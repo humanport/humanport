@@ -23,10 +23,12 @@ defmodule Humanport.Requests do
   resources do
     resource HumanRequest do
       define :get_request, action: :read, get_by: [:id]
-      # InboxLive's list — narrowed with `query: [filter: ..., sort: ...]` by
-      # the caller (D-16's open/answered toggle is plan 01-05's job; Task 2
-      # only needs the open list).
       define :list_requests, action: :read
+      # D-16 — the inbox's single toggle. The tenant/state/waiting split
+      # lives in these two read actions (see human_request.ex), not as a
+      # filter InboxLive builds inline.
+      define :list_open_requests, action: :open
+      define :list_answered_requests, action: :answered
     end
   end
 

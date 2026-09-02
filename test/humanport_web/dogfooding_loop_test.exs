@@ -62,7 +62,10 @@ defmodule HumanportWeb.DogfoodingLoopTest do
     # agent label rendered as unverified, and the answer card.
     {:ok, inbox_live, inbox_html} = live(conn, ~p"/requests")
     assert inbox_html =~ "Which changelog entry?"
-    assert has_element?(inbox_live, "a", "Which changelog entry?")
+    # Plan 01-05 replaced the tracer's per-row <a> with a role="option" div —
+    # the inbox is a keyboard-operable listbox now, not a set of navigable
+    # links (Enter opens the keyboard-selected option via push_navigate).
+    assert has_element?(inbox_live, "[role=option]", "Which changelog entry?")
 
     {:ok, detail_live, detail_html} = live(conn, ~p"/requests/#{id}")
     assert detail_html =~ "Which changelog entry?"

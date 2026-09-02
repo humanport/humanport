@@ -129,6 +129,22 @@ defmodule Humanport.Requests.HumanRequest do
   actions do
     defaults [:read]
 
+    # D-16 — the inbox's single open/answered toggle. Business logic
+    # (which states count as "open" vs "answered") belongs here, in the
+    # domain, not as a filter clause built inline in InboxLive. Both are
+    # served by the same `[:tenant_id, :state, :inserted_at]` composite
+    # index the resource already declares above.
+    read :open do
+      prepare build(filter: expr(state == :pending), sort: [inserted_at: :desc])
+    end
+
+    read :answered do
+      prepare build(
+                filter: expr(state in [:answered, :approved, :rejected]),
+                sort: [completed_at: :desc]
+              )
+    end
+
     create :submit do
       # `tenant_id` is NEVER accepted from the wire (D-05) — it is set below
       # from application config, not by the caller.
