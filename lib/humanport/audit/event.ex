@@ -74,6 +74,14 @@ defmodule Humanport.Audit.Event do
     # is required to accept the full set of public attributes below. No
     # `:update`, no `:destroy`: this resource has neither action, at all.
     defaults [:read, create: :*]
+
+    # §20.3 — `RequestTimeline` (plan 01-05) reads a request's own audit
+    # trail, oldest first, so it renders as a story rather than a version
+    # diff.
+    read :for_request do
+      argument :request_id, :uuid, allow_nil?: false
+      prepare build(filter: expr(request_id == ^arg(:request_id)), sort: [occurred_at: :asc])
+    end
   end
 
   attributes do

@@ -1,17 +1,29 @@
 defmodule HumanportWeb.RequestLive do
   @moduledoc """
-  UI-02/UI-07 — the request detail view at `/requests/:id`. Renders the
-  title, the agent label (always unverified in Phase 1, D-12), and the
-  decision block. `HumanPort.UI.AnswerCard` is the only path that submits a
-  free-text answer (D-17) — this LiveView never builds a changeset or decides
-  a transition itself; `answer_submit` calls `Humanport.Requests.answer/3`
-  directly, the same domain function PROTO-01's controller calls, so both
-  surfaces get the same transaction-wrapped audit write.
+  UI-02/UI-07 — the request detail view at `/requests/:id`, and the **only**
+  place a response can be submitted (D-17). Renders the seven blocks the
+  UI-SPEC fixes, in order: title, `AgentBadge`, `RiskBadge`, `MetaList`,
+  `ContextBlock`, `RequestTimeline`, the decision block. A block with no
+  data is omitted entirely rather than rendered empty.
+
+  **The short id is the LAST five hex characters of the UUID**, hyphens
+  removed, lowercased (D-20) — never the first five. The primary key is a
+  UUIDv7 whose leading bits are a millisecond timestamp; a token taken from
+  the front would be shared by every request created in the same ~3.1-day
+  window, which is the exact collision this mechanism exists to prevent.
+  The same short id is what `PaneHeader` already displays, so the
+  confirmation token is legible on screen rather than guessable from memory.
 
   Subscribes to its own per-request topic `"request:<id>"` on connect
   (D-15). `handle_info/2` re-reads from the database and re-renders — the
-  broadcast payload is never trusted, only the re-read is. This is the same
-  rule plan 01-04's long-poll depends on.
+  broadcast payload is never trusted, only the re-read is (same rule plan
+  01-04's long-poll depends on).
+
+  This LiveView never builds a changeset or decides a transition itself —
+  `answer_submit`/`approve_submit`/`reject_submit` call
+  `Humanport.Requests.answer/3` / `approve/2` / `reject/2` directly, the
+  same domain functions the plain-HTTP surface calls, so every surface gets
+  the same transaction-wrapped audit write.
   """
 
   use HumanportWeb, :live_view
@@ -25,11 +37,9 @@ defmodule HumanportWeb.RequestLive do
         if connected?(socket), do: HumanportWeb.Endpoint.subscribe("request:#{id}")
 
         {:ok,
-         assign(socket,
-           request: request,
-           answer_value: "",
-           answer_state: if(request.completed_at, do: :decided, else: :editing)
-         )}
+         socket
+         |> assign(confirm_value: "", answer_value: "")
+         |> load_request(request)}
 
       {:error, _error} ->
         {:ok,
@@ -42,18 +52,8 @@ defmodule HumanportWeb.RequestLive do
   @impl true
   def handle_info(%Phoenix.Socket.Broadcast{topic: "request:" <> _id}, socket) do
     case Requests.get_request(socket.assigns.request.id) do
-      {:ok, request} ->
-        socket = assign(socket, :request, request)
-
-        {:noreply,
-         if request.completed_at do
-           assign(socket, :answer_state, :decided)
-         else
-           socket
-         end}
-
-      {:error, _error} ->
-        {:noreply, socket}
+      {:ok, request} -> {:noreply, load_request(socket, request)}
+      {:error, _error} -> {:noreply, socket}
     end
   end
 
@@ -66,49 +66,292 @@ defmodule HumanportWeb.RequestLive do
     socket = assign(socket, :answer_state, :submitting)
 
     case Requests.answer(socket.assigns.request, value, socket.assigns.actor) do
-      {:ok, answered} ->
-        {:noreply, assign(socket, request: answered, answer_state: :decided)}
-
-      {:error, _error} ->
-        {:noreply,
-         socket
-         |> assign(:answer_state, :editing)
-         |> put_flash(:error, gettext("Your answer could not be saved."))}
+      {:ok, answered} -> {:noreply, load_request(socket, answered)}
+      {:error, error} -> {:noreply, handle_response_error(socket, error, :answer_state, :editing)}
     end
   end
+
+  def handle_event("confirm_change", %{"confirm" => value}, socket) do
+    socket = assign(socket, :confirm_value, value)
+    {:noreply, assign(socket, :decision_state, lock_state(socket))}
+  end
+
+  def handle_event("approve_submit", _params, socket) do
+    socket = assign(socket, :decision_state, :submitting)
+
+    case Requests.approve(socket.assigns.request, socket.assigns.actor) do
+      {:ok, approved} ->
+        {:noreply, load_request(socket, approved)}
+
+      {:error, error} ->
+        {:noreply, handle_response_error(socket, error, :decision_state, lock_state(socket))}
+    end
+  end
+
+  def handle_event("reject_submit", _params, socket) do
+    socket = assign(socket, :decision_state, :submitting)
+
+    case Requests.reject(socket.assigns.request, socket.assigns.actor) do
+      {:ok, rejected} ->
+        {:noreply, load_request(socket, rejected)}
+
+      {:error, error} ->
+        {:noreply, handle_response_error(socket, error, :decision_state, lock_state(socket))}
+    end
+  end
+
+  # ---- request/state loading -------------------------------------------
+
+  defp load_request(socket, request) do
+    {:ok, events} = Humanport.Audit.list_events_for_request(request.id)
+    short = short_id(request.id)
+    token = confirm_token(short)
+    confirm_value = socket.assigns[:confirm_value] || ""
+
+    decision_state =
+      cond do
+        request.completed_at -> :decided
+        token_matches?(confirm_value, token) -> :unlocked
+        true -> :locked
+      end
+
+    assign(socket,
+      request: request,
+      short_id: short,
+      confirm_token: token,
+      events: timeline_events(events),
+      answer_state: if(request.completed_at, do: :decided, else: :editing),
+      decision_state: decision_state
+    )
+  end
+
+  defp lock_state(socket) do
+    if token_matches?(socket.assigns.confirm_value, socket.assigns.confirm_token) do
+      :unlocked
+    else
+      :locked
+    end
+  end
+
+  # ---- error paths (conflict, save-failure) ------------------------------
+
+  defp handle_response_error(socket, error, state_key, fallback_state) do
+    if conflict_error?(error) do
+      case Requests.get_request(socket.assigns.request.id) do
+        {:ok, fresh} ->
+          socket
+          |> load_request(fresh)
+          |> put_flash(:error, conflict_message(fresh))
+
+        {:error, _error} ->
+          socket
+          |> assign(state_key, fallback_state)
+          |> put_flash(:error, gettext("This request was already answered."))
+      end
+    else
+      socket
+      |> assign(state_key, fallback_state)
+      |> put_flash(
+        :error,
+        gettext("The connection to the server dropped. Nothing was recorded — try again.")
+      )
+    end
+  end
+
+  defp conflict_error?(%Ash.Error.Invalid{errors: errors}) do
+    Enum.any?(errors, fn
+      %Ash.Error.Changes.StaleRecord{} -> true
+      %AshStateMachine.Errors.NoMatchingTransition{} -> true
+      _ -> false
+    end)
+  end
+
+  defp conflict_error?(_error), do: false
+
+  defp conflict_message(request) do
+    gettext(
+      "This request was already answered. %{actor} answered it at %{time}. Your response was not recorded.",
+      actor: actor_label(request.decided_by),
+      time: format_time(request.completed_at)
+    )
+  end
+
+  # ---- short id / confirmation token (D-20) -----------------------------
+
+  @doc """
+  D-20 — the request's short id: the LAST five hex characters of its UUID,
+  hyphens removed, lowercased. Never the first five — the primary key is a
+  UUIDv7 whose leading ~48 bits are a millisecond timestamp (RFC 9562), so a
+  front-derived token would collide across every request created in the
+  same ~3.1-day window. Public so this derivation can be asserted directly
+  against fixed UUIDs in tests, independent of a live request's real id.
+  """
+  def short_id(id) do
+    id
+    |> String.replace("-", "")
+    |> String.downcase()
+    |> String.slice(-5, 5)
+  end
+
+  defp confirm_token(short), do: "approve " <> short
+
+  defp token_matches?(value, expected), do: normalize(value) == normalize(expected)
+
+  defp normalize(nil), do: ""
+  defp normalize(str) when is_binary(str), do: str |> String.trim() |> String.downcase()
+
+  # ---- timeline (block 6) -------------------------------------------------
+
+  defp timeline_events([]), do: []
+
+  defp timeline_events(events) do
+    last_index = length(events) - 1
+
+    events
+    |> Enum.with_index()
+    |> Enum.map(fn {event, index} ->
+      %{time: event.occurred_at, text: event_sentence(event), current: index == last_index}
+    end)
+  end
+
+  defp event_sentence(%{event_type: "request.created", actor_label: actor}),
+    do: gettext("%{actor} created this request.", actor: actor || gettext("unknown"))
+
+  defp event_sentence(%{event_type: "request.responded", actor_label: actor}),
+    do: gettext("%{actor} answered it.", actor: actor || gettext("unknown"))
+
+  defp event_sentence(%{event_type: "request.approved", actor_label: actor}),
+    do: gettext("%{actor} approved it.", actor: actor || gettext("unknown"))
+
+  defp event_sentence(%{event_type: "request.rejected", actor_label: actor}),
+    do: gettext("%{actor} rejected it.", actor: actor || gettext("unknown"))
+
+  defp event_sentence(event), do: event.event_type
+
+  # ---- meta list (block 4) -------------------------------------------------
+
+  defp meta_items(request) do
+    [
+      %{key: "state", value: to_string(request.state), tone: :default},
+      %{key: "waited", value: waited_value(request), tone: :default},
+      %{key: "type", value: to_string(request.type), tone: :default},
+      %{key: "source", value: request.source, tone: :default},
+      %{key: "external_correlation", value: request.external_correlation, tone: :default},
+      %{key: "subject", value: subject_value(request), tone: :default}
+    ]
+  end
+
+  defp waited_value(request) do
+    ends_at = request.completed_at || DateTime.utc_now()
+    seconds = DateTime.diff(ends_at, request.inserted_at)
+    minutes = div(seconds, 60)
+
+    cond do
+      minutes < 1 -> "<1m"
+      minutes < 60 -> "#{minutes}m"
+      minutes < 1440 -> "#{div(minutes, 60)}h"
+      true -> "#{div(minutes, 1440)}d"
+    end
+  end
+
+  defp subject_value(%{subject: %{type: type, label: label}})
+       when is_binary(type) and is_binary(label),
+       do: "#{type} · #{label}"
+
+  defp subject_value(_request), do: nil
+
+  # ---- context block (block 5) ---------------------------------------------
+
+  defp context_rows(context) when is_map(context) and map_size(context) > 0 do
+    if flat_context?(context) do
+      Enum.map(context, fn {k, v} -> {to_string(k), to_string(v)} end)
+    end
+  end
+
+  defp context_rows(_context), do: nil
+
+  defp context_text(context) when is_map(context) and map_size(context) > 0 do
+    unless flat_context?(context), do: Jason.encode!(context, pretty: true)
+  end
+
+  defp context_text(_context), do: nil
+
+  defp flat_context?(context),
+    do: Enum.all?(Map.values(context), &(not is_map(&1) and not is_list(&1)))
+
+  # ---- shared actor/time formatting -----------------------------------------
+
+  defp actor_label(%{"label" => label}) when is_binary(label), do: label
+  defp actor_label(%{label: label}) when is_binary(label), do: label
+  defp actor_label(_actor), do: gettext("unknown")
+
+  defp format_time(nil), do: ""
+  defp format_time(%DateTime{} = dt), do: Calendar.strftime(dt, "%Y-%m-%d %H:%M UTC")
+  defp format_time(other), do: to_string(other)
 
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="flex flex-col gap-6 p-4">
-      <h1 class="font-mono text-[length:var(--hp-text-title)] font-extrabold tracking-[-.02em] text-text-primary">
-        {@request.title}
-      </h1>
+    <Layouts.app flash={@flash}>
+      <.pane_header form={:detail} short_id={@short_id}></.pane_header>
 
-      <p class="font-mono text-[length:var(--hp-text-meta)]">
-        <span class="text-text-faint underline decoration-dotted">
-          {@request.requester_label}
-        </span>
-        <span class="text-text-primary">[{gettext("unverified")}]</span>
-      </p>
+      <div class="flex flex-col gap-6 p-4">
+        <h1 class="font-mono text-[length:var(--hp-text-title)] font-extrabold tracking-[-.02em] text-text-primary">
+          {@request.title}
+        </h1>
 
-      <.answer_card
-        :if={@request.type == :ask}
-        id={"answer-#{@request.id}"}
-        state={@answer_state}
-        value={@answer_value}
-        answer={@request.answer}
-        answered_by={@request.decided_by}
-        answered_at={@request.completed_at}
-      />
+        <.agent_badge name={@request.requester_label} verified={@request.requester_verified} />
 
-      <p
-        :if={@request.type != :ask}
-        class="font-mono text-[length:var(--hp-text-body)] text-text-secondary"
-      >
-        {gettext("This request type cannot be answered yet.")}
-      </p>
-    </div>
+        <.risk_badge level={@request.risk} reversible={@request.reversible} layout={:block} />
+
+        <.meta_list items={meta_items(@request)} />
+
+        <.context_block
+          rows={context_rows(@request.context)}
+          text={context_text(@request.context)}
+        />
+
+        <.request_timeline :if={@events != []} events={@events} />
+
+        <.approval_card
+          :if={@request.type == :approve}
+          id={"approval-#{@request.id}"}
+          confirm_token={@confirm_token}
+          value={@confirm_value}
+          state={@decision_state}
+          decision={@request.decision}
+          decided_by={@request.decided_by}
+          decided_at={@request.completed_at}
+          agent={@request.requester_label}
+        />
+
+        <.answer_card
+          :if={@request.type == :ask}
+          id={"answer-#{@request.id}"}
+          state={@answer_state}
+          value={@answer_value}
+          answer={@request.answer}
+          answered_by={@request.decided_by}
+          answered_at={@request.completed_at}
+          agent={@request.requester_label}
+        />
+
+        <div
+          :if={@request.type in [:choose, :escalate]}
+          class="flex flex-col gap-2 rounded-inner border border-border-hairline bg-surface-raised p-4 font-mono text-[length:var(--hp-text-body)]"
+        >
+          <p class="font-bold text-text-primary">
+            {gettext("This request type cannot be answered yet.")}
+          </p>
+          <p class="text-text-secondary">
+            {gettext(
+              "HumanPort recorded a %{type} request, but this version answers only ask and approve. Nothing will happen to it.",
+              type: @request.type
+            )}
+          </p>
+        </div>
+      </div>
+    </Layouts.app>
     """
   end
 end

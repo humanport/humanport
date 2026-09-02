@@ -142,52 +142,54 @@ defmodule HumanportWeb.InboxLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <.pane_header form={:root}>
-      <:stats>{@open_count} {gettext("open")}</:stats>
-    </.pane_header>
+    <Layouts.app flash={@flash}>
+      <.pane_header form={:root}>
+        <:stats>{@open_count} {gettext("open")}</:stats>
+      </.pane_header>
 
-    <.filter_tabs active={@active_tab} />
+      <.filter_tabs active={@active_tab} />
 
-    <div
-      id="inbox-listbox"
-      role="listbox"
-      tabindex="0"
-      aria-label={gettext("Requests")}
-      aria-activedescendant={"request-card-#{@selected_index}"}
-      phx-keydown="inbox_key"
-      class="flex flex-col outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
-    >
-      <.request_card
-        :for={{request, index} <- Enum.with_index(@requests)}
-        index={index}
-        title={request.title}
-        agent={request.requester_label}
-        type={request.type}
-        target={subject_label(request)}
-        risk_level={request.risk}
-        reversible={request.reversible}
-        state={request.state}
-        waited={@active_tab == :open && waited_label(request)}
-        selected={index == @selected_index}
-        answered={@active_tab == :answered}
-        result={@active_tab == :answered && result_token(request)}
-        decided_by={@active_tab == :answered && decided_by_label(request)}
-      />
+      <div
+        id="inbox-listbox"
+        role="listbox"
+        tabindex="0"
+        aria-label={gettext("Requests")}
+        aria-activedescendant={"request-card-#{@selected_index}"}
+        phx-keydown="inbox_key"
+        class="flex flex-col outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+      >
+        <.request_card
+          :for={{request, index} <- Enum.with_index(@requests)}
+          index={index}
+          title={request.title}
+          agent={request.requester_label}
+          type={request.type}
+          target={subject_label(request)}
+          risk_level={request.risk}
+          reversible={request.reversible}
+          state={request.state}
+          waited={@active_tab == :open && waited_label(request)}
+          selected={index == @selected_index}
+          answered={@active_tab == :answered}
+          result={@active_tab == :answered && result_token(request)}
+          decided_by={@active_tab == :answered && decided_by_label(request)}
+        />
 
-      <.empty
-        :if={@requests == [] and @active_tab == :open}
-        title={gettext("Nothing is waiting on you")}
-        description={
-          gettext("New requests appear here the moment an agent creates one. No reload needed.")
-        }
-      />
+        <.empty
+          :if={@requests == [] and @active_tab == :open}
+          title={gettext("Nothing is waiting on you")}
+          description={
+            gettext("New requests appear here the moment an agent creates one. No reload needed.")
+          }
+        />
 
-      <.empty
-        :if={@requests == [] and @active_tab == :answered}
-        title={gettext("Nothing answered yet")}
-        description={gettext("Requests you have answered move here.")}
-      />
-    </div>
+        <.empty
+          :if={@requests == [] and @active_tab == :answered}
+          title={gettext("Nothing answered yet")}
+          description={gettext("Requests you have answered move here.")}
+        />
+      </div>
+    </Layouts.app>
     """
   end
 

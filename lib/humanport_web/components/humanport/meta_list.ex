@@ -16,16 +16,21 @@ defmodule HumanPort.UI.MetaList do
   attr :items, :list, default: []
   attr :class, :any, default: nil
 
+  # Rendered as a single "key:value" token per row (the Console notation —
+  # `state:pending`, `waited:6m` — is one glued token, never a key and a
+  # value in visually separate columns). `dt`/`dd` sit on one source line
+  # with nothing between their tags, so no whitespace text node can slip
+  # between the colon-bearing key and its value.
   def meta_list(assigns) do
     ~H"""
-    <dl class={[
-      "grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 font-mono text-[length:var(--hp-text-token)]",
-      @class
-    ]}>
-      <%= for item <- present(@items) do %>
-        <dt class="text-text-faint">{item.key}</dt>
-        <dd class={tone_class(Map.get(item, :tone, :default))}>{item.value}</dd>
-      <% end %>
+    <dl class={["flex flex-col gap-1 font-mono text-[length:var(--hp-text-token)]", @class]}>
+      <div :for={item <- present(@items)} class="flex items-baseline gap-1">
+        <dt class="text-text-faint">{item.key}:</dt><dd class={
+          tone_class(Map.get(item, :tone, :default))
+        }>
+          {item.value}
+        </dd>
+      </div>
     </dl>
     """
   end

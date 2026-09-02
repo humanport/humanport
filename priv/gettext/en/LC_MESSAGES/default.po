@@ -11,12 +11,12 @@ msgstr ""
 "Language: en\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-#: lib/humanport_web/components/humanport/answer_card.ex:87
+#: lib/humanport_web/components/humanport/answer_card.ex:91
 #, elixir-autogen, elixir-format
 msgid "Answered at %{time}."
 msgstr ""
 
-#: lib/humanport_web/components/humanport/answer_card.ex:90
+#: lib/humanport_web/components/humanport/answer_card.ex:94
 #, elixir-autogen, elixir-format
 msgid "Answered by %{actor} at %{time}."
 msgstr ""
@@ -27,32 +27,28 @@ msgstr ""
 msgid "Attempting to reconnect"
 msgstr ""
 
-#: lib/humanport_web/live/inbox_live.ex:68
+#: lib/humanport_web/live/inbox_live.ex:180
 #, elixir-autogen, elixir-format
 msgid "Nothing is waiting on you"
 msgstr ""
 
-#: lib/humanport_web/live/inbox_live.ex:53
-#, elixir-autogen, elixir-format
-msgid "Open requests"
-msgstr ""
-
-#: lib/humanport_web/live/request_live.ex:37
+#: lib/humanport_web/live/request_live.ex:47
 #, elixir-autogen, elixir-format
 msgid "Request not found."
 msgstr ""
 
 #: lib/humanport_web/components/humanport/filter_tabs.ex:30
+#: lib/humanport_web/live/inbox_live.ex:156
 #, elixir-autogen, elixir-format
 msgid "Requests"
 msgstr ""
 
-#: lib/humanport_web/components/humanport/answer_card.ex:69
+#: lib/humanport_web/components/humanport/answer_card.ex:70
 #, elixir-autogen, elixir-format
 msgid "Send answer"
 msgstr ""
 
-#: lib/humanport_web/components/humanport/answer_card.ex:80
+#: lib/humanport_web/components/humanport/answer_card.ex:81
 #, elixir-autogen, elixir-format
 msgid "Sending your answer…"
 msgstr ""
@@ -62,12 +58,12 @@ msgstr ""
 msgid "Something went wrong!"
 msgstr ""
 
-#: lib/humanport_web/live/request_live.ex:109
+#: lib/humanport_web/live/request_live.ex:339
 #, elixir-autogen, elixir-format
 msgid "This request type cannot be answered yet."
 msgstr ""
 
-#: lib/humanport_web/components/humanport/answer_card.ex:85
+#: lib/humanport_web/components/humanport/answer_card.ex:86
 #, elixir-autogen, elixir-format
 msgid "Waiting for this answer."
 msgstr ""
@@ -77,19 +73,14 @@ msgstr ""
 msgid "We can't find the internet"
 msgstr ""
 
-#: lib/humanport_web/components/humanport/answer_card.ex:83
+#: lib/humanport_web/components/humanport/answer_card.ex:84
 #, elixir-autogen, elixir-format
 msgid "Write an answer to enable Send answer."
 msgstr ""
 
-#: lib/humanport_web/components/humanport/answer_card.ex:58
+#: lib/humanport_web/components/humanport/answer_card.ex:59
 #, elixir-autogen, elixir-format
 msgid "Your answer"
-msgstr ""
-
-#: lib/humanport_web/live/request_live.ex:76
-#, elixir-autogen, elixir-format
-msgid "Your answer could not be saved."
 msgstr ""
 
 #: lib/humanport_web/components/humanport/filter_tabs.ex:43
@@ -129,7 +120,7 @@ msgid "on behalf of"
 msgstr ""
 
 #: lib/humanport_web/components/humanport/filter_tabs.ex:36
-#: lib/humanport_web/live/inbox_live.ex:49
+#: lib/humanport_web/live/inbox_live.ex:147
 #, elixir-autogen, elixir-format
 msgid "open"
 msgstr ""
@@ -139,14 +130,19 @@ msgstr ""
 msgid "overdue"
 msgstr ""
 
-#: lib/humanport_web/components/humanport/answer_card.ex:98
+#: lib/humanport_web/components/humanport/answer_card.ex:102
+#: lib/humanport_web/components/humanport/approval_card.ex:143
+#: lib/humanport_web/live/request_live.ex:212
+#: lib/humanport_web/live/request_live.ex:215
+#: lib/humanport_web/live/request_live.ex:218
+#: lib/humanport_web/live/request_live.ex:221
+#: lib/humanport_web/live/request_live.ex:280
 #, elixir-autogen, elixir-format
 msgid "unknown"
 msgstr ""
 
 #: lib/humanport_web/components/humanport/actor_identity.ex:44
 #: lib/humanport_web/components/humanport/agent_badge.ex:36
-#: lib/humanport_web/live/request_live.ex:92
 #, elixir-autogen, elixir-format
 msgid "unverified"
 msgstr ""
@@ -155,4 +151,114 @@ msgstr ""
 #: lib/humanport_web/components/humanport/agent_badge.ex:37
 #, elixir-autogen, elixir-format
 msgid "verified"
+msgstr ""
+
+#: lib/humanport_web/live/request_live.ex:215
+#, elixir-autogen, elixir-format
+msgid "%{actor} answered it."
+msgstr ""
+
+#: lib/humanport_web/live/request_live.ex:218
+#, elixir-autogen, elixir-format
+msgid "%{actor} approved it."
+msgstr ""
+
+#: lib/humanport_web/live/request_live.ex:212
+#, elixir-autogen, elixir-format
+msgid "%{actor} created this request."
+msgstr ""
+
+#: lib/humanport_web/live/request_live.ex:221
+#, elixir-autogen, elixir-format
+msgid "%{actor} rejected it."
+msgstr ""
+
+#: lib/humanport_web/components/humanport/answer_card.ex:89
+#, elixir-autogen, elixir-format
+msgid "%{agent} is waiting for this answer."
+msgstr ""
+
+#: lib/humanport_web/components/humanport/approval_card.ex:134
+#, elixir-autogen, elixir-format
+msgid "%{decision} by %{actor} at %{time}."
+msgstr ""
+
+#: lib/humanport_web/components/humanport/approval_card.ex:97
+#, elixir-autogen, elixir-format
+msgid "Approve"
+msgstr ""
+
+#: lib/humanport_web/components/humanport/approval_card.ex:122
+#, elixir-autogen, elixir-format
+msgid "Approve is unlocked."
+msgstr ""
+
+#: lib/humanport_web/components/humanport/approval_card.ex:125
+#, elixir-autogen, elixir-format
+msgid "Approve is unlocked. Approving lets %{agent} proceed."
+msgstr ""
+
+#: lib/humanport_web/components/humanport/approval_card.ex:130
+#, elixir-autogen, elixir-format
+msgid "Approved"
+msgstr ""
+
+#: lib/humanport_web/components/humanport/approval_card.ex:80
+#, elixir-autogen, elixir-format
+msgid "Confirmation"
+msgstr ""
+
+#: lib/humanport_web/live/request_live.ex:342
+#, elixir-autogen, elixir-format
+msgid "HumanPort recorded a %{type} request, but this version answers only ask and approve. Nothing will happen to it."
+msgstr ""
+
+#: lib/humanport_web/live/inbox_live.ex:182
+#, elixir-autogen, elixir-format
+msgid "New requests appear here the moment an agent creates one. No reload needed."
+msgstr ""
+
+#: lib/humanport_web/live/inbox_live.ex:188
+#, elixir-autogen, elixir-format
+msgid "Nothing answered yet"
+msgstr ""
+
+#: lib/humanport_web/components/humanport/approval_card.ex:128
+#, elixir-autogen, elixir-format
+msgid "Recording your decision…"
+msgstr ""
+
+#: lib/humanport_web/components/humanport/approval_card.ex:106
+#, elixir-autogen, elixir-format
+msgid "Reject"
+msgstr ""
+
+#: lib/humanport_web/components/humanport/approval_card.ex:131
+#, elixir-autogen, elixir-format
+msgid "Rejected"
+msgstr ""
+
+#: lib/humanport_web/live/inbox_live.ex:189
+#, elixir-autogen, elixir-format
+msgid "Requests you have answered move here."
+msgstr ""
+
+#: lib/humanport_web/live/request_live.ex:150
+#, elixir-autogen, elixir-format
+msgid "The connection to the server dropped. Nothing was recorded — try again."
+msgstr ""
+
+#: lib/humanport_web/live/request_live.ex:143
+#, elixir-autogen, elixir-format
+msgid "This request was already answered."
+msgstr ""
+
+#: lib/humanport_web/live/request_live.ex:166
+#, elixir-autogen, elixir-format
+msgid "This request was already answered. %{actor} answered it at %{time}. Your response was not recorded."
+msgstr ""
+
+#: lib/humanport_web/components/humanport/approval_card.ex:119
+#, elixir-autogen, elixir-format
+msgid "Type %{token} to unlock Approve."
 msgstr ""

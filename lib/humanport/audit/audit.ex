@@ -8,7 +8,11 @@ defmodule Humanport.Audit do
   use Ash.Domain
 
   resources do
-    resource Humanport.Audit.Event
+    resource Humanport.Audit.Event do
+      # RequestTimeline's data source (plan 01-05) — a request's own audit
+      # trail, oldest first.
+      define :list_events_for_request, action: :for_request, args: [:request_id]
+    end
   end
 
   alias Humanport.Actors.Actor

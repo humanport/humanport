@@ -25,6 +25,7 @@ defmodule HumanPort.UI.AnswerCard do
   attr :answer, :string, default: nil
   attr :answered_by, :map, default: nil
   attr :answered_at, :any, default: nil
+  attr :agent, :string, default: nil
   attr :id, :string, required: true
   attr :on_change, :string, default: "answer_change"
   attr :on_submit, :string, default: "answer_submit"
@@ -70,19 +71,22 @@ defmodule HumanPort.UI.AnswerCard do
           </.button>
         </div>
         <p id={@hint_id} class="mt-2 font-mono text-[length:var(--hp-text-body)] text-text-secondary">
-          {editing_hint(@state, @value)}
+          {editing_hint(@state, @value, @agent)}
         </p>
       </form>
     </div>
     """
   end
 
-  defp editing_hint(:submitting, _value), do: gettext("Sending your answer…")
+  defp editing_hint(:submitting, _value, _agent), do: gettext("Sending your answer…")
 
-  defp editing_hint(_state, value) when value in [nil, ""],
+  defp editing_hint(_state, value, _agent) when value in [nil, ""],
     do: gettext("Write an answer to enable Send answer.")
 
-  defp editing_hint(_state, _value), do: gettext("Waiting for this answer.")
+  defp editing_hint(_state, _value, nil), do: gettext("Waiting for this answer.")
+
+  defp editing_hint(_state, _value, agent),
+    do: gettext("%{agent} is waiting for this answer.", agent: agent)
 
   defp answered_hint(nil, at), do: gettext("Answered at %{time}.", time: format_time(at))
 

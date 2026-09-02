@@ -110,7 +110,9 @@ defmodule HumanportWeb.Live.RequestLiveTest do
       {:ok, view, _html} = live(conn, ~p"/requests/#{request.id}")
 
       view
-      |> form("#approval-#{request.id}-form", %{"confirm" => "  APPROVE #{String.upcase(short)}  "})
+      |> form("#approval-#{request.id}-form", %{
+        "confirm" => "  APPROVE #{String.upcase(short)}  "
+      })
       |> render_change()
 
       assert has_element?(view, "button:not([disabled])", "Approve")
