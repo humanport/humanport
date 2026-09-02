@@ -7,6 +7,11 @@ defmodule HumanportWeb.RequestLive do
   a transition itself; `answer_submit` calls `Humanport.Requests.answer/3`
   directly, the same domain function PROTO-01's controller calls, so both
   surfaces get the same transaction-wrapped audit write.
+
+  Subscribes to its own per-request topic `"request:<id>"` on connect
+  (D-15). `handle_info/2` re-reads from the database and re-renders — the
+  broadcast payload is never trusted, only the re-read is. This is the same
+  rule plan 01-04's long-poll depends on.
   """
 
   use HumanportWeb, :live_view
@@ -17,6 +22,8 @@ defmodule HumanportWeb.RequestLive do
   def mount(%{"id" => id}, _session, socket) do
     case Requests.get_request(id) do
       {:ok, request} ->
+        if connected?(socket), do: HumanportWeb.Endpoint.subscribe("request:#{id}")
+
         {:ok,
          assign(socket,
            request: request,
@@ -29,6 +36,24 @@ defmodule HumanportWeb.RequestLive do
          socket
          |> put_flash(:error, gettext("Request not found."))
          |> push_navigate(to: ~p"/requests")}
+    end
+  end
+
+  @impl true
+  def handle_info(%Phoenix.Socket.Broadcast{topic: "request:" <> _id}, socket) do
+    case Requests.get_request(socket.assigns.request.id) do
+      {:ok, request} ->
+        socket = assign(socket, :request, request)
+
+        {:noreply,
+         if request.completed_at do
+           assign(socket, :answer_state, :decided)
+         else
+           socket
+         end}
+
+      {:error, _error} ->
+        {:noreply, socket}
     end
   end
 

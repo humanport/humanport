@@ -4,7 +4,14 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="csrf-token" content={get_csrf_token()} />
-    <.live_title default="HumanPort" suffix=" · humanport">{assigns[:page_title]}</.live_title>
+    <%!--
+      D-18 — the browser tab title is the literal open-count token
+      ("(3) humanport" / "humanport" with the count omitted at zero), not a
+      prefix/suffix composition. `live_title`'s own `prefix`/`suffix`
+      attributes would append a second " · humanport" onto a `@page_title`
+      that already carries the full literal string — leave both unset.
+    --%>
+    <.live_title default="humanport">{assigns[:page_title]}</.live_title>
     <link phx-track-static rel="stylesheet" href={~p"/assets/css/app.css"} />
     <script defer phx-track-static type="text/javascript" src={~p"/assets/js/app.js"}>
     </script>
