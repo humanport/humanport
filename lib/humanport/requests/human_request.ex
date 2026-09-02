@@ -58,6 +58,44 @@ defmodule Humanport.Requests.HumanRequest do
       # The inbox query (D-05 tenant scoping, D-16 open/answered toggle).
       index [:tenant_id, :state, :inserted_at]
     end
+
+    # T-01-14 / Pattern 4(c) — the terminal-row trigger. Defends against
+    # every code path that is NOT one of the atomic actions above (console
+    # access, a future script, a mistake in a later phase). See the
+    # moduledoc section "The terminal-row trigger" for what this does and
+    # does not cover. Same two-statement shape as the audit_events
+    # append-only trigger in `Humanport.Audit.Event` (D-14's own reasoning
+    # applies identically here): a function, then a row-level trigger using
+    # it.
+    custom_statements do
+      statement :human_requests_terminal_is_final_fn do
+        up """
+        CREATE OR REPLACE FUNCTION human_requests_terminal_is_final() RETURNS trigger AS $$
+        BEGIN
+          IF OLD.completed_at IS NOT NULL THEN
+            RAISE EXCEPTION 'human_request % is already terminal (state=%)', OLD.id, OLD.state
+              USING ERRCODE = 'integrity_constraint_violation';
+          END IF;
+          RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+        """
+
+        down "DROP FUNCTION IF EXISTS human_requests_terminal_is_final();"
+      end
+
+      statement :human_requests_terminal_is_final_trigger do
+        after_tables ["human_requests"]
+
+        up """
+        CREATE TRIGGER human_requests_terminal_is_final
+          BEFORE UPDATE ON human_requests
+          FOR EACH ROW EXECUTE FUNCTION human_requests_terminal_is_final();
+        """
+
+        down "DROP TRIGGER IF EXISTS human_requests_terminal_is_final ON human_requests;"
+      end
+    end
   end
 
   # Phase 1 has exactly four states: `pending` is the initial and only
