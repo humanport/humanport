@@ -1,0 +1,158 @@
+## "msgid"s in this file come from POT (.pot) files.
+###
+### Do not add, change, or remove "msgid"s manually here as
+### they're tied to the ones in the corresponding POT file
+### (with the same domain).
+###
+### Use "mix gettext.extract --merge" or "mix gettext.merge"
+### to merge POT files into PO files.
+msgid ""
+msgstr ""
+"Language: en\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#: lib/humanport_web/components/humanport/answer_card.ex:87
+#, elixir-autogen, elixir-format
+msgid "Answered at %{time}."
+msgstr ""
+
+#: lib/humanport_web/components/humanport/answer_card.ex:90
+#, elixir-autogen, elixir-format
+msgid "Answered by %{actor} at %{time}."
+msgstr ""
+
+#: lib/humanport_web/components/layouts.ex:74
+#: lib/humanport_web/components/layouts.ex:89
+#, elixir-autogen, elixir-format
+msgid "Attempting to reconnect"
+msgstr ""
+
+#: lib/humanport_web/live/inbox_live.ex:68
+#, elixir-autogen, elixir-format
+msgid "Nothing is waiting on you"
+msgstr ""
+
+#: lib/humanport_web/live/inbox_live.ex:53
+#, elixir-autogen, elixir-format
+msgid "Open requests"
+msgstr ""
+
+#: lib/humanport_web/live/request_live.ex:37
+#, elixir-autogen, elixir-format
+msgid "Request not found."
+msgstr ""
+
+#: lib/humanport_web/components/humanport/filter_tabs.ex:30
+#, elixir-autogen, elixir-format
+msgid "Requests"
+msgstr ""
+
+#: lib/humanport_web/components/humanport/answer_card.ex:69
+#, elixir-autogen, elixir-format
+msgid "Send answer"
+msgstr ""
+
+#: lib/humanport_web/components/humanport/answer_card.ex:80
+#, elixir-autogen, elixir-format
+msgid "Sending your answer…"
+msgstr ""
+
+#: lib/humanport_web/components/layouts.ex:81
+#, elixir-autogen, elixir-format
+msgid "Something went wrong!"
+msgstr ""
+
+#: lib/humanport_web/live/request_live.ex:109
+#, elixir-autogen, elixir-format
+msgid "This request type cannot be answered yet."
+msgstr ""
+
+#: lib/humanport_web/components/humanport/answer_card.ex:85
+#, elixir-autogen, elixir-format
+msgid "Waiting for this answer."
+msgstr ""
+
+#: lib/humanport_web/components/layouts.ex:66
+#, elixir-autogen, elixir-format
+msgid "We can't find the internet"
+msgstr ""
+
+#: lib/humanport_web/components/humanport/answer_card.ex:83
+#, elixir-autogen, elixir-format
+msgid "Write an answer to enable Send answer."
+msgstr ""
+
+#: lib/humanport_web/components/humanport/answer_card.ex:58
+#, elixir-autogen, elixir-format
+msgid "Your answer"
+msgstr ""
+
+#: lib/humanport_web/live/request_live.ex:76
+#, elixir-autogen, elixir-format
+msgid "Your answer could not be saved."
+msgstr ""
+
+#: lib/humanport_web/components/humanport/filter_tabs.ex:43
+#, elixir-autogen, elixir-format
+msgid "answered"
+msgstr ""
+
+#: lib/humanport_web/components/humanport/actor_identity.ex:53
+#: lib/humanport_web/components/humanport/request_card.ex:74
+#, elixir-autogen, elixir-format
+msgid "by"
+msgstr ""
+
+#: lib/humanport_web/components/core_components.ex:79
+#, elixir-autogen, elixir-format
+msgid "close"
+msgstr ""
+
+#: lib/humanport_web/components/humanport/request_timeline.ex:27
+#, elixir-autogen, elixir-format
+msgid "current"
+msgstr ""
+
+#: lib/humanport_web/components/humanport/request_card.ex:65
+#, elixir-autogen, elixir-format
+msgid "escalated"
+msgstr ""
+
+#: lib/humanport_web/components/humanport/actor_identity.ex:54
+#, elixir-autogen, elixir-format
+msgid "escalated to"
+msgstr ""
+
+#: lib/humanport_web/components/humanport/actor_identity.ex:55
+#, elixir-autogen, elixir-format
+msgid "on behalf of"
+msgstr ""
+
+#: lib/humanport_web/components/humanport/filter_tabs.ex:36
+#: lib/humanport_web/live/inbox_live.ex:49
+#, elixir-autogen, elixir-format
+msgid "open"
+msgstr ""
+
+#: lib/humanport_web/components/humanport/request_card.ex:64
+#, elixir-autogen, elixir-format
+msgid "overdue"
+msgstr ""
+
+#: lib/humanport_web/components/humanport/answer_card.ex:98
+#, elixir-autogen, elixir-format
+msgid "unknown"
+msgstr ""
+
+#: lib/humanport_web/components/humanport/actor_identity.ex:44
+#: lib/humanport_web/components/humanport/agent_badge.ex:36
+#: lib/humanport_web/live/request_live.ex:92
+#, elixir-autogen, elixir-format
+msgid "unverified"
+msgstr ""
+
+#: lib/humanport_web/components/humanport/actor_identity.ex:46
+#: lib/humanport_web/components/humanport/agent_badge.ex:37
+#, elixir-autogen, elixir-format
+msgid "verified"
+msgstr ""
