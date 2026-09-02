@@ -17,10 +17,20 @@ defmodule HumanportWeb.RequestController do
   the lifetime of the pending request (D-02).
 
   `POST /api/v1/requests/:id/respond` → 200, or 409 conflict / 422 invalid /
-  404 not found.
+  404 not found. Body carries `"answer"` for an `ask` request or
+  `"decision": "approve" | "reject"` for an `approve` request; sending the
+  wrong shape for the request's type is a 422, not a 409 — see
+  `HumanportWeb.FallbackController`.
 
   Errors render as `{"error": {"code", "message", "details"}}` with the code
   set `not_found | conflict | invalid | not_implemented | internal`.
+
+  This surface is unauthenticated in Phase 1 by design (D-09/D-11) — it
+  resolves an actor (via `HumanportWeb.Plugs.ResolveActor`) so writes carry a
+  recorded, unverified identity, but nothing here checks a token or a
+  session. It MUST NOT be reachable from the internet until the Cloudflare
+  Access gate (Phase 2, OPS-03) sits in front of it; that gate, not this
+  module, is the compensating control (T-01-22).
 
   Every action calls `Humanport.Requests` — never builds a changeset and
   never decides a transition itself (§5.2, §54.12).
@@ -28,19 +38,17 @@ defmodule HumanportWeb.RequestController do
 
   use HumanportWeb, :controller
 
+  action_fallback HumanportWeb.FallbackController
+
   alias Humanport.Requests
 
   @terminal_states [:answered, :approved, :rejected]
 
   def create(conn, params) do
-    case Requests.submit(params, conn.assigns.actor) do
-      {:ok, request} ->
-        conn
-        |> put_status(:created)
-        |> render(:show, request: request)
-
-      {:error, error} ->
-        render_error(conn, error)
+    with {:ok, request} <- Requests.submit(params, conn.assigns.actor) do
+      conn
+      |> put_status(:created)
+      |> render(:show, request: request)
     end
   end
 
@@ -62,20 +70,15 @@ defmodule HumanportWeb.RequestController do
 
     if wait > 0, do: HumanportWeb.Endpoint.unsubscribe(topic)
 
-    case result do
-      {:ok, request} -> render(conn, :show, request: request)
-      {:error, error} -> render_error(conn, error)
+    with {:ok, request} <- result do
+      render(conn, :show, request: request)
     end
   end
 
   def respond(conn, %{"id" => id} = params) do
-    answer = Map.get(params, "answer")
-
     with {:ok, request} <- Requests.get_request(id),
-         {:ok, answered} <- Requests.answer(request, answer, conn.assigns.actor) do
-      render(conn, :show, request: answered)
-    else
-      {:error, error} -> render_error(conn, error)
+         {:ok, responded} <- dispatch_respond(request, params, conn.assigns.actor) do
+      render(conn, :show, request: responded)
     end
   end
 
@@ -133,47 +136,26 @@ defmodule HumanportWeb.RequestController do
 
   defp max_wait, do: Application.get_env(:humanport, :long_poll_max_wait_seconds, 50)
 
-  defp render_error(conn, error) do
-    {status, code, message} = map_error(error)
-
-    conn
-    |> put_status(status)
-    |> render(:error, code: code, message: message, details: %{})
-  end
-
-  # Pattern 7 — inspect the *contained* error, not only the class: both "you
-  # sent nonsense" and "someone beat you to it" arrive as Ash.Error.Invalid.
-  defp map_error(%Ash.Error.Invalid{errors: errors}) do
-    cond do
-      Enum.any?(errors, &match?(%Ash.Error.Query.NotFound{}, &1)) ->
-        {:not_found, "not_found", "Request not found."}
-
-      Enum.any?(errors, &match?(%Ash.Error.Changes.StaleRecord{}, &1)) ->
-        {:conflict, "conflict", "This request was already answered."}
-
-      Enum.any?(errors, &match?(%AshStateMachine.Errors.NoMatchingTransition{}, &1)) ->
-        {:conflict, "conflict", "This request was already answered."}
-
-      Enum.any?(errors, &not_implemented_type?/1) ->
-        {:unprocessable_entity, "not_implemented",
-         "This request type cannot be created in this version."}
-
-      true ->
-        {:unprocessable_entity, "invalid", Ash.Error.error_descriptions(errors)}
+  defp dispatch_respond(request, %{"decision" => decision}, actor) do
+    case decision do
+      "approve" -> Requests.approve(request, actor)
+      "reject" -> Requests.reject(request, actor)
+      _ -> invalid_field_error(:decision, "decision must be \"approve\" or \"reject\"")
     end
   end
 
-  defp map_error(%Ash.Error.Forbidden{errors: errors}) do
-    {:forbidden, "invalid", Ash.Error.error_descriptions(errors)}
+  defp dispatch_respond(request, %{"answer" => answer}, actor) do
+    Requests.answer(request, answer, actor)
   end
 
-  defp map_error(_error) do
-    {:internal_server_error, "internal", "Your answer could not be saved."}
+  defp dispatch_respond(_request, _params, _actor) do
+    invalid_field_error(:body, "request body must include either \"answer\" or \"decision\"")
   end
 
-  defp not_implemented_type?(%Ash.Error.Changes.InvalidAttribute{field: :type, message: message}) do
-    is_binary(message) and String.contains?(message, "not implemented")
+  defp invalid_field_error(field, message) do
+    {:error,
+     Ash.Error.Invalid.exception(
+       errors: [Ash.Error.Changes.InvalidAttribute.exception(field: field, message: message)]
+     )}
   end
-
-  defp not_implemented_type?(_), do: false
 end
