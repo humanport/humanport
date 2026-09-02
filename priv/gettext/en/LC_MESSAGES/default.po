@@ -58,7 +58,7 @@ msgstr ""
 msgid "Something went wrong!"
 msgstr ""
 
-#: lib/humanport_web/live/request_live.ex:339
+#: lib/humanport_web/live/request_live.ex:344
 #, elixir-autogen, elixir-format
 msgid "This request type cannot be answered yet."
 msgstr ""
@@ -132,11 +132,11 @@ msgstr ""
 
 #: lib/humanport_web/components/humanport/answer_card.ex:102
 #: lib/humanport_web/components/humanport/approval_card.ex:143
-#: lib/humanport_web/live/request_live.ex:212
-#: lib/humanport_web/live/request_live.ex:215
 #: lib/humanport_web/live/request_live.ex:218
 #: lib/humanport_web/live/request_live.ex:221
-#: lib/humanport_web/live/request_live.ex:280
+#: lib/humanport_web/live/request_live.ex:224
+#: lib/humanport_web/live/request_live.ex:227
+#: lib/humanport_web/live/request_live.ex:286
 #, elixir-autogen, elixir-format
 msgid "unknown"
 msgstr ""
@@ -153,22 +153,22 @@ msgstr ""
 msgid "verified"
 msgstr ""
 
-#: lib/humanport_web/live/request_live.ex:215
+#: lib/humanport_web/live/request_live.ex:221
 #, elixir-autogen, elixir-format
 msgid "%{actor} answered it."
 msgstr ""
 
-#: lib/humanport_web/live/request_live.ex:218
+#: lib/humanport_web/live/request_live.ex:224
 #, elixir-autogen, elixir-format
 msgid "%{actor} approved it."
 msgstr ""
 
-#: lib/humanport_web/live/request_live.ex:212
+#: lib/humanport_web/live/request_live.ex:218
 #, elixir-autogen, elixir-format
 msgid "%{actor} created this request."
 msgstr ""
 
-#: lib/humanport_web/live/request_live.ex:221
+#: lib/humanport_web/live/request_live.ex:227
 #, elixir-autogen, elixir-format
 msgid "%{actor} rejected it."
 msgstr ""
@@ -208,7 +208,7 @@ msgstr ""
 msgid "Confirmation"
 msgstr ""
 
-#: lib/humanport_web/live/request_live.ex:342
+#: lib/humanport_web/live/request_live.ex:347
 #, elixir-autogen, elixir-format
 msgid "HumanPort recorded a %{type} request, but this version answers only ask and approve. Nothing will happen to it."
 msgstr ""
@@ -243,17 +243,17 @@ msgstr ""
 msgid "Requests you have answered move here."
 msgstr ""
 
-#: lib/humanport_web/live/request_live.ex:150
+#: lib/humanport_web/live/request_live.ex:156
 #, elixir-autogen, elixir-format
 msgid "The connection to the server dropped. Nothing was recorded — try again."
 msgstr ""
 
-#: lib/humanport_web/live/request_live.ex:143
+#: lib/humanport_web/live/request_live.ex:149
 #, elixir-autogen, elixir-format
 msgid "This request was already answered."
 msgstr ""
 
-#: lib/humanport_web/live/request_live.ex:166
+#: lib/humanport_web/live/request_live.ex:172
 #, elixir-autogen, elixir-format
 msgid "This request was already answered. %{actor} answered it at %{time}. Your response was not recorded."
 msgstr ""
