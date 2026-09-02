@@ -1,0 +1,74 @@
+/* HumanPort · Console palette. Every role has a value in both themes; none exists in only one.
+   Ratios in comments are measured against that theme's own surface.base.
+   Dark is the default; prefers-color-scheme:light switches to the light sibling;
+   [data-theme] overrides the system preference in both directions. */
+
+:root {
+  --hp-surface-base: #0B0E14;
+  --hp-surface-raised: #111725;
+  --hp-border-hairline: #1E2635;
+  --hp-border-strong: #2C3A50;
+  --hp-text-primary: #E7EDF5;      /* 16.4:1 */
+  --hp-text-secondary: #8A9BB0;    /* 6.8:1 */
+  --hp-text-faint: #7E8FA6;        /* 5.9:1 */
+  --hp-text-disabled: #6B7C93;     /* 3.5:1 — documented exception, see readme.md */
+  --hp-accent-actionable: #2BE8B0; /* 12.2:1 */
+  --hp-text-on-accent: #0B0E14;
+  --hp-accent-destructive: #FF7B72;/* 7.6:1 */
+  --hp-border-destructive: #5C2F2C;
+  --hp-focus-ring: #2BE8B0;
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --hp-surface-base: #EEF1F4;
+    --hp-surface-raised: #FFFFFF;
+    --hp-border-hairline: #D8DEE6;
+    --hp-border-strong: #A8B4C2;
+    --hp-text-primary: #0F1722;      /* 16.1:1 */
+    --hp-text-secondary: #46586C;    /* 6.4:1 */
+    --hp-text-faint: #5A6B7E;        /* 4.8:1 */
+    --hp-text-disabled: #64748A;     /* 4.2:1 */
+    --hp-accent-actionable: #0B6E50; /* 5.5:1 */
+    --hp-text-on-accent: #EEF1F4;
+    --hp-accent-destructive: #C0281F;/* 5.2:1 */
+    --hp-border-destructive: #E8C4C1;
+    --hp-focus-ring: #1146D8;        /* 6.4:1 — the one role whose hue changes between themes */
+    color-scheme: light;
+  }
+}
+
+[data-theme="dark"] {
+  --hp-surface-base: #0B0E14;
+  --hp-surface-raised: #111725;
+  --hp-border-hairline: #1E2635;
+  --hp-border-strong: #2C3A50;
+  --hp-text-primary: #E7EDF5;
+  --hp-text-secondary: #8A9BB0;
+  --hp-text-faint: #7E8FA6;
+  --hp-text-disabled: #6B7C93;
+  --hp-accent-actionable: #2BE8B0;
+  --hp-text-on-accent: #0B0E14;
+  --hp-accent-destructive: #FF7B72;
+  --hp-border-destructive: #5C2F2C;
+  --hp-focus-ring: #2BE8B0;
+  color-scheme: dark;
+}
+
+[data-theme="light"] {
+  --hp-surface-base: #EEF1F4;
+  --hp-surface-raised: #FFFFFF;
+  --hp-border-hairline: #D8DEE6;
+  --hp-border-strong: #A8B4C2;
+  --hp-text-primary: #0F1722;
+  --hp-text-secondary: #46586C;
+  --hp-text-faint: #5A6B7E;
+  --hp-text-disabled: #64748A;
+  --hp-accent-actionable: #0B6E50;
+  --hp-text-on-accent: #EEF1F4;
+  --hp-accent-destructive: #C0281F;
+  --hp-border-destructive: #E8C4C1;
+  --hp-focus-ring: #1146D8;
+  color-scheme: light;
+}

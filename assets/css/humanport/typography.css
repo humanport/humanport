@@ -1,0 +1,26 @@
+/* Type is split by job, and the split is a rule, not a preference:
+   JetBrains Mono carries structure and data — every token, key, value, title, table cell,
+   sigil and keyboard hint. Geist 400 carries prose only — the "why it stopped" paragraph
+   and other running sentences. A value never sets in Geist; a paragraph never sets in mono. */
+
+:root {
+  --hp-font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --hp-font-prose: Geist, system-ui, -apple-system, sans-serif;
+
+  --hp-weight-body: 400;
+  --hp-weight-key: 700;
+  --hp-weight-title: 800;
+
+  --hp-text-label: 10px;   /* uppercase section labels, .12em tracking */
+  --hp-text-meta: 11px;    /* log lines, keyboard hints, row sublines */
+  --hp-text-token: 12px;   /* key:value tokens, pane chrome */
+  --hp-text-body: 13px;    /* body / control labels */
+  --hp-text-row: 14px;     /* inbox row title, prose */
+  --hp-text-title: 22px;   /* detail title, weight 800 */
+  --hp-text-title-lg: 26px;/* desktop pane title, weight 800 */
+
+  --hp-tracking-label: .12em;
+  --hp-tracking-title: -.02em;
+  --hp-leading-prose: 1.6;
+  --hp-leading-token: 1.7;
+}

@@ -1,0 +1,27 @@
+/* Tailwind v4 surface. This block is what makes the roles available as utilities
+   (bg-surface-raised, text-text-secondary, border-border-hairline, ring-focus-ring …).
+   Each entry points at the raw --hp-* custom property from tokens/colors.css, so the
+   utilities follow the theme switch — the @theme block itself is static, the values are not.
+   Browsers outside a Tailwind build ignore @theme; the :root declarations do the work. */
+
+@theme {
+  --color-surface-base: var(--hp-surface-base);
+  --color-surface-raised: var(--hp-surface-raised);
+  --color-border-hairline: var(--hp-border-hairline);
+  --color-border-strong: var(--hp-border-strong);
+  --color-text-primary: var(--hp-text-primary);
+  --color-text-secondary: var(--hp-text-secondary);
+  --color-text-faint: var(--hp-text-faint);
+  --color-text-disabled: var(--hp-text-disabled);
+  --color-accent-actionable: var(--hp-accent-actionable);
+  --color-text-on-accent: var(--hp-text-on-accent);
+  --color-accent-destructive: var(--hp-accent-destructive);
+  --color-border-destructive: var(--hp-border-destructive);
+  --color-focus-ring: var(--hp-focus-ring);
+
+  --font-mono: var(--hp-font-mono);
+  --font-prose: var(--hp-font-prose);
+
+  --radius-pane: var(--hp-radius-pane);
+  --radius-inner: var(--hp-radius-inner);
+}

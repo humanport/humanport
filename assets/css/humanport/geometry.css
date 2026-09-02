@@ -1,0 +1,14 @@
+/* Geometry: two radii, one hairline, one focus ring. Nothing else. */
+
+:root {
+  --hp-radius-pane: 6px;   /* pane and window edges */
+  --hp-radius-inner: 3px;  /* controls, blocks, badges inside a pane */
+  --hp-border-width: 1px;
+
+  --hp-focus-width: 2px;
+  --hp-focus-offset: 2px;
+
+  --hp-pane-width: 402px;  /* the single-pane / mobile column */
+  --hp-space-row: 13px 16px;
+  --hp-space-pane: 16px;
+}

@@ -1,0 +1,12 @@
+/* PLACEHOLDER — must be replaced before this ships.
+ *
+ * An @import to Google Fonts makes every page load reach a third party. HumanPort is
+ * meant to be self-hosted (§2.7) and to run without external dependencies, so a font
+ * request that leaves the machine is a dependency the product does not accept: it
+ * leaks visitor IPs to a third party, breaks in an air-gapped deployment, and adds a
+ * failure mode outside the operator's control.
+ *
+ * Replace with self-hosted .woff2 files and real @font-face declarations, subset to
+ * the weights actually used: JetBrains Mono 400/700/800, Geist 400/500.
+ */
+@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Geist:wght@400;500&display=swap");
