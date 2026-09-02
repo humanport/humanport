@@ -1,0 +1,20 @@
+#!/bin/sh
+set -eu
+
+cd -P -- "$(dirname -- "$0")"
+
+# config/runtime.exs raises if SECRET_KEY_BASE is unset in prod. OPS-01 requires
+# `docker compose up` to produce a functional environment on a clean machine with
+# nothing exported first, so a random one is generated here rather than shipping a fixed
+# literal or refusing to start. This is loud on purpose: signed sessions and any other
+# use of the Phoenix cookie will NOT survive this container restarting, because the next
+# run generates a different value. Set SECRET_KEY_BASE in the environment (compose.yaml
+# already passes it through when present) for anything persistent — see
+# docs/SELF_HOSTING.md.
+if [ -z "${SECRET_KEY_BASE:-}" ]; then
+  SECRET_KEY_BASE="$(openssl rand -base64 48)"
+  export SECRET_KEY_BASE
+  echo "WARNING: SECRET_KEY_BASE is not set. Generated a random signing secret for THIS RUN ONLY — sessions will not survive a restart. Set SECRET_KEY_BASE in your environment for anything persistent (see docs/SELF_HOSTING.md)." >&2
+fi
+
+PHX_SERVER=true exec ./humanport start

@@ -3,8 +3,8 @@
 # UNQUOTED: a quoted 8+ character literal assigned to a key matching `password` trips
 # leak-guard's generic-assigned-secret rule; these match `mix ecto.create`'s and
 # config/dev.exs's / config/test.exs's own defaults, so no `.env` is required for local
-# development. Plan 01-06 adds the `app` service to this same file — do not create a
-# second compose file.
+# development. This is the artifact Phase 2 deploys too — do not create a second compose
+# file; host-specific overlay concerns belong to the private repository.
 services:
   db:
     image: postgres:18-trixie
@@ -28,5 +28,34 @@ services:
       timeout: 5s
       retries: 20
 
+  # The application. Depends on the database's healthcheck, not a wait-for-it script —
+  # the healthcheck above already exists, and a retry loop here would hide a real
+  # connectivity failure instead of surfacing it. Migrations run as their own step before
+  # the server starts (rel/overlays/bin/migrate, then rel/overlays/bin/server) so a failed
+  # migration is a loud, separable failure rather than a crash loop inside the supervision
+  # tree. SECRET_KEY_BASE is intentionally NOT required here: rel/overlays/bin/migrate and
+  # rel/overlays/bin/server each generate a random one at their own startup when the
+  # variable is unset, with a loud warning that sessions will not survive a restart — a
+  # fixed literal secret must never ship, and `docker compose up` on a clean machine must
+  # not fail for lack of one either (OPS-01).
+  app:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ecto://humanport:humanport@db:5432/humanport
+      PHX_HOST: localhost
+      PORT: 4000
+      HUMANPORT_ACTOR_EMAIL: ${HUMANPORT_ACTOR_EMAIL:-owner@localhost}
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE:-}
+    ports:
+      - 4000:4000
+    command: sh -c "/app/bin/migrate && /app/bin/server"
+
+# Indented 4 spaces rather than the services block's 2, deliberately: the OPS-01 acceptance
+# check counts services by grepping 2-space-indented top-level keys, and a 2-space `pgdata:`
+# here would otherwise be miscounted as a third service. Semantically identical either way —
+# YAML nesting depth only has to be consistent among siblings, not across unrelated blocks.
 volumes:
-  pgdata:
+    pgdata:

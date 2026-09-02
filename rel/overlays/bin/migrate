@@ -1,0 +1,19 @@
+#!/bin/sh
+set -eu
+
+cd -P -- "$(dirname -- "$0")"
+
+# config/runtime.exs raises if SECRET_KEY_BASE is unset in prod, on every invocation of
+# this release — including a plain migration run, which never signs a cookie. OPS-01
+# requires `docker compose up` to work on a clean machine with nothing exported first, so
+# a value is generated here when missing rather than making startup fail. This is not the
+# value the running server ends up using (rel/overlays/bin/server generates its own the
+# same way); it exists only to satisfy runtime.exs's check for the duration of this
+# migration.
+if [ -z "${SECRET_KEY_BASE:-}" ]; then
+  SECRET_KEY_BASE="$(openssl rand -base64 48)"
+  export SECRET_KEY_BASE
+  echo "WARNING: SECRET_KEY_BASE is not set. Generated a temporary one to run migrations. Set SECRET_KEY_BASE in your environment for anything persistent (see docs/SELF_HOSTING.md)." >&2
+fi
+
+exec ./humanport eval Humanport.Release.migrate
