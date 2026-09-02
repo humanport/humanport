@@ -87,6 +87,13 @@ defmodule HumanportWeb do
       # Core UI components
       import HumanportWeb.CoreComponents
 
+      # HumanPort.UI.* — the domain component layer. Usage rule #21: prefer one
+      # of these before reaching for a Petal primitive directly.
+      import HumanPort.UI.PaneHeader
+
+      # Petal Components v4 primitives, imported unqualified (<.button>, <.field>, …).
+      use PetalComponents
+
       # Common modules used in templates
       alias Phoenix.LiveView.JS
       alias HumanportWeb.Layouts
