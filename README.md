@@ -64,8 +64,28 @@ The open-source edition is a complete, self-hostable HumanPort deployment — no
 a demo and not an artificially limited edition. Protocol interoperability
 (REST, OpenAPI, MCP, A2A) is open source and will stay open source.
 
-Docker Compose based self-hosting instructions will land in [`docs/`](docs/)
-as the runtime takes shape.
+```bash
+git clone https://github.com/humanport/humanport.git
+cd humanport
+docker compose up
+```
+
+That starts HumanPort and PostgreSQL, and nothing else — no variable has to be
+exported first. Open <http://localhost:4000/requests> once it reports it is
+serving.
+
+An agent creates a request the same way, over plain HTTP — no SDK required:
+
+```bash
+curl -s http://localhost:4000/api/v1/requests \
+  -H 'content-type: application/json' \
+  -d '{"type":"approve","title":"Deploy release 1.4 to prod?","requester_label":"claude-code"}'
+```
+
+It appears in the inbox live, without a reload. Full details — what this
+version does and does not require, what it does and does not guarantee, and
+the environment variables you can set — are in
+[`docs/SELF_HOSTING.md`](docs/SELF_HOSTING.md).
 
 ## Open core
 
