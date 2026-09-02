@@ -23,7 +23,25 @@ defmodule Humanport.Requests.HumanRequest do
   happy-path test, and silently downgrades the action to read-modify-write —
   destroying the guarantee while looking correct. The audit write lives in
   `Ash.transaction/3` at the `Humanport.Requests` domain-function level
-  instead (see `answer/3`), never as a change on this resource.
+  instead (see `answer/3`, `approve/2`, `reject/2`), never as a change on
+  this resource.
+
+  ## The terminal-row trigger (CORE-07, T-01-14)
+
+  `postgres.custom_statements` below declares
+  `human_requests_terminal_is_final()`, a `BEFORE UPDATE` trigger that raises
+  whenever `OLD.completed_at` is already set — regardless of which code path
+  issued the `UPDATE`. The atomic transition guard and the atomic
+  `completed_at` filter on `:answer`/`:approve`/`:reject` are the mechanisms
+  that produce CORE-07's *deterministic conflict result* for a losing
+  concurrent responder going through those actions; this trigger is a
+  backstop for every other code path — a console session, a future script, a
+  mistake in a later phase. Its error is deliberately ugly on purpose:
+  reaching it means something bypassed the domain. It does **not** stand in
+  for §54.8 content-binding (that is the content-hash-bound approval record,
+  SEC-08, Phase 4, not yet built), and it does not stop the table owner from
+  dropping the table or disabling the trigger — the same D-14 limit already
+  accepted for the audit trigger.
   """
 
   use Ash.Resource,
@@ -48,25 +66,25 @@ defmodule Humanport.Requests.HumanRequest do
   # `routed` and `viewed` are §11 candidate states that only start
   # distinguishing anything once routing exists — they belong to Phase 5 and
   # must not be introduced here.
+  #
+  # Plan 01-02 declared only `:answer` here — `approved`/`rejected` were
+  # reserved via `extra_states` because AshStateMachine's own
+  # `VerifyTransitionActions` verifier rejects a declared transition whose
+  # `action:` does not already exist, and the `:approve`/`:reject` actions
+  # were deferred to this plan. Now that both actions exist below, their
+  # transitions are declared here instead of `extra_states` — the union of
+  # every transition's `from`/`to` plus `initial_states` still resolves to
+  # the same four-state set the first migration already carries (see
+  # `AshStateMachine.Transformers.FillInTransitionDefaults`), so this is not
+  # a schema change.
   state_machine do
     initial_states [:pending]
     default_initial_state :pending
 
-    # `approved`/`rejected` are reserved via `extra_states` so the `:state`
-    # column's enum carries all four Phase 1 states from the first migration
-    # (Phase 5 needs no `ALTER TYPE`, same reasoning as D-06's `type` enum) —
-    # but NOT as declared `transitions`. AshStateMachine's own
-    # `VerifyTransitionActions` verifier requires every declared transition's
-    # `action:` to already exist on the resource; declaring `:approve`/
-    # `:reject` transitions here, before plan 01-03 adds the actions that use
-    # them, fails compilation outright. The plan text's "declare the
-    # transitions now" was written against a false premise — only the
-    # actions were meant to land in 01-03, not the transitions. Both now
-    # land together in 01-03, exactly where the actions do.
-    extra_states [:approved, :rejected]
-
     transitions do
       transition :answer, from: :pending, to: :answered
+      transition :approve, from: :pending, to: :approved
+      transition :reject, from: :pending, to: :rejected
     end
   end
 
@@ -111,6 +129,25 @@ defmodule Humanport.Requests.HumanRequest do
       change transition_state(:answered)
       change {Humanport.Requests.Changes.SetDecidedBy, []}
       # NO `change after_action(...)` here — see the moduledoc landmine.
+    end
+
+    # Shaped exactly like `:answer` above, on purpose — same atomicity
+    # property, same absence of any non-atomic change. Only the target
+    # decision/state and the transition differ.
+    update :approve do
+      change filter(expr(is_nil(completed_at)))
+      change set_attribute(:decision, :approved)
+      change set_attribute(:completed_at, &DateTime.utc_now/0)
+      change transition_state(:approved)
+      change {Humanport.Requests.Changes.SetDecidedBy, []}
+    end
+
+    update :reject do
+      change filter(expr(is_nil(completed_at)))
+      change set_attribute(:decision, :rejected)
+      change set_attribute(:completed_at, &DateTime.utc_now/0)
+      change transition_state(:rejected)
+      change {Humanport.Requests.Changes.SetDecidedBy, []}
     end
   end
 
