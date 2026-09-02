@@ -1,0 +1,32 @@
+# HumanPort plus PostgreSQL, and nothing else (OPS-01). No cache, no admin UI, no mail
+# catcher — self-hosting is a single `docker compose up`. Environment values below stay
+# UNQUOTED: a quoted 8+ character literal assigned to a key matching `password` trips
+# leak-guard's generic-assigned-secret rule; these match `mix ecto.create`'s and
+# config/dev.exs's / config/test.exs's own defaults, so no `.env` is required for local
+# development. Plan 01-06 adds the `app` service to this same file — do not create a
+# second compose file.
+services:
+  db:
+    image: postgres:18-trixie
+    environment:
+      POSTGRES_USER: humanport
+      POSTGRES_PASSWORD: humanport
+      POSTGRES_DB: humanport
+    ports:
+      - 5432:5432
+    # PostgreSQL 18's Docker image switched its data-directory convention to
+    # "pg_ctlcluster"-style major-version-specific subdirectories, so the volume now
+    # mounts at /var/lib/postgresql (the image places data in a versioned subdirectory
+    # beneath it), not the old /var/lib/postgresql/data. Mounting at the old path leaves
+    # the image unable to find its data and it refuses to start. Discovered running this
+    # task's own verification, not covered by Phase 1 research.
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U humanport]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  pgdata:

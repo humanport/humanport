@@ -9,8 +9,8 @@ config :ash, policies: [show_policy_breakdowns?: true]
 # split honest and leaves nothing in this file to exempt. Defaults match the `db`
 # service in compose.yaml.
 config :humanport, Humanport.Repo,
-  username: System.get_env("DATABASE_USERNAME", "postgres"),
-  password: System.get_env("DATABASE_PASSWORD", "postgres"),
+  username: System.get_env("DATABASE_USERNAME", "humanport"),
+  password: System.get_env("DATABASE_PASSWORD", "humanport"),
   hostname: System.get_env("DATABASE_HOSTNAME", "localhost"),
   port: String.to_integer(System.get_env("DATABASE_PORT", "5432")),
   database: System.get_env("DATABASE_NAME", "humanport_dev"),

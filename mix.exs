@@ -12,7 +12,8 @@ defmodule Humanport.MixProject do
       deps: deps(),
       compilers: [:phoenix_live_view] ++ Mix.compilers(),
       listeners: [Phoenix.CodeReloader],
-      consolidate_protocols: Mix.env() != :dev
+      consolidate_protocols: Mix.env() != :dev,
+      usage_rules: usage_rules()
     ]
   end
 
@@ -35,6 +36,25 @@ defmodule Humanport.MixProject do
   # Specifies which paths to compile per environment.
   defp elixirc_paths(:test), do: ["lib", "test/support"]
   defp elixirc_paths(_), do: ["lib"]
+
+  # DEV-01: link (not inline) the Ash family's usage rules into AGENTS.md, below
+  # the hand-written HumanPort section. `usage_rules` 1.2.7 dropped the CLI
+  # positional-args/--link-to-folder form the research assumed (`mix help
+  # usage_rules.sync` confirmed it now raises on task-specific args); this
+  # project-config form is the current API. `ash_state_machine` ships no
+  # usage-rules.md and `petal_components` ships `rules.md` instead of
+  # `usage-rules.md`, so neither is picked up here — the AGENTS.md hand-written
+  # section and a manual reference to `deps/petal_components/rules.md` cover them.
+  defp usage_rules do
+    [
+      file: "AGENTS.md",
+      usage_rules: [
+        {:ash, link: :markdown},
+        {:ash_postgres, link: :markdown},
+        {:ash_phoenix, link: :markdown}
+      ]
+    ]
+  end
 
   # Specifies your project dependencies.
   #
