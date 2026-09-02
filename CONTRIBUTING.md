@@ -37,6 +37,38 @@ is genuinely meant to be public, append the marker `leak-guard:allow` to it. If 
 real secret ever reaches a commit, rotate it — removing the line does not unpublish
 it.
 
+## How changes reach `main`
+
+`main` is protected by a ruleset: it cannot be deleted, cannot be force-pushed, and
+cannot be updated by a commit that has not passed the `leak-guard` check. That check
+is what stands between a mistake and a permanent public record, so it runs before
+publication rather than after.
+
+In practice this means a commit is checked on a branch first:
+
+```bash
+git switch -c my-change
+# ... work, commit ...
+git push -u origin my-change     # leak-guard runs here
+```
+
+Then either open a pull request, or — once the check is green — fast-forward `main`:
+
+```bash
+git switch main && git merge --ff-only my-change && git push
+```
+
+Pushing a fresh commit straight to `main` is rejected, because nothing has verified
+it yet. That rejection is the rule working, not a misconfiguration.
+
+**If the ruleset itself has to come off** — a genuine emergency, not a hurry — set it
+to `evaluate` rather than deleting it, and put it back the same day:
+
+```bash
+gh api -X PUT repos/humanport/humanport/rulesets/22109140 -f enforcement=evaluate
+gh api -X PUT repos/humanport/humanport/rulesets/22109140 -f enforcement=active
+```
+
 ## Development
 
 ```bash
