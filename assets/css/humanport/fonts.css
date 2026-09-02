@@ -1,12 +1,55 @@
-/* PLACEHOLDER — must be replaced before this ships.
+/* Self-hosted only. HumanPort never fetches an asset from a third party at runtime.
  *
- * An @import to Google Fonts makes every page load reach a third party. HumanPort is
- * meant to be self-hosted (§2.7) and to run without external dependencies, so a font
- * request that leaves the machine is a dependency the product does not accept: it
- * leaks visitor IPs to a third party, breaks in an air-gapped deployment, and adds a
- * failure mode outside the operator's control.
+ * A page that loads a font from a CDN reveals every visitor's IP and User-Agent to
+ * that CDN, fails in an air-gapped deployment, and adds an outage mode the operator
+ * cannot fix. HumanPort is meant to be self-hosted (§2.7) with PostgreSQL as its only
+ * required dependency — an external asset request contradicts that.
  *
- * Replace with self-hosted .woff2 files and real @font-face declarations, subset to
- * the weights actually used: JetBrains Mono 400/700/800, Geist 400/500.
+ * The same rule covers everything else: no CDN scripts, no remote stylesheets, no
+ * hotlinked images, no analytics beacons. Everything the browser loads is served by
+ * the HumanPort instance itself.
+ *
+ * The .woff2 files are vendored into priv/static/fonts/ and are part of the OCI image.
+ * Subset to the weights actually used — adding a weight means adding a file, on
+ * purpose: an unused weight is bytes every visitor pays for.
  */
-@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Geist:wght@400;500&display=swap");
+
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/jetbrains-mono-400.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/jetbrains-mono-700.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/jetbrains-mono-800.woff2") format("woff2");
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Geist";
+  src: url("/fonts/geist-400.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Geist";
+  src: url("/fonts/geist-500.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
