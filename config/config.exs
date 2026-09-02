@@ -54,7 +54,14 @@ config :spark,
 
 config :humanport,
   ecto_repos: [Humanport.Repo],
-  generators: [timestamp_type: :utc_datetime]
+  generators: [timestamp_type: :utc_datetime],
+  ash_domains: [Humanport.Requests, Humanport.Audit],
+  # D-09 — the actor-resolver seam. Phase 2 swaps this for
+  # Humanport.Actors.Resolvers.CloudflareAccess without touching a write path.
+  actor_resolver: Humanport.Actors.Resolvers.Env,
+  # D-05 — never accepted from the wire. A stable default UUID, overridable
+  # per environment in config/runtime.exs.
+  default_tenant_id: "00000000-0000-0000-0000-000000000001"
 
 # Configure the endpoint
 config :humanport, HumanportWeb.Endpoint,

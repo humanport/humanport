@@ -2,15 +2,41 @@ defmodule Humanport.Fixtures do
   @moduledoc """
   Test fixtures for HumanPort domain resources.
 
-  Every fixture in this module MUST be built on the resource's real Ash code
-  interface (e.g. the eventual `HumanPort.Requests.HumanRequest.submit/1`),
-  never on `Repo.insert` directly — a fixture that bypasses the action under
-  test bypasses the behaviour the test exists to prove.
-
-  Empty for now: the `HumanRequest` resource and its `:submit` action do not
-  exist yet in this plan (01-01, scaffolding only). `request_fixture/1` lands
-  in plan 01-02 when the action does, built against the sandboxed
-  (`Humanport.DataCase`) and unsandboxed (`Humanport.UnsandboxedCase`) case
-  templates that already exist in this directory.
+  Every fixture in this module MUST be built on the resource's real Ash
+  action (via `Humanport.Requests.submit/2`), never on `Repo.insert`
+  directly — a fixture that bypasses the action under test bypasses the
+  behaviour the test exists to prove.
   """
+
+  alias Humanport.Actors.Actor
+  alias Humanport.Requests
+
+  @doc """
+  Builds a `HumanRequest` via `Humanport.Requests.submit/2` — the real
+  `:submit` action, with its own audit write, not `Repo.insert`.
+
+  Accepts the same param keys `:submit` accepts, plus an optional `:actor`
+  (defaults to an unverified human actor matching the local D-11 seam).
+  """
+  def request_fixture(attrs \\ %{}) do
+    {actor, attrs} = Map.pop(attrs, :actor, default_actor())
+
+    params =
+      Map.merge(
+        %{
+          type: :ask,
+          title: "Which changelog entry?",
+          requester_label: "claude-code/gsd"
+        },
+        attrs
+      )
+
+    {:ok, request} = Requests.submit(params, actor)
+    request
+  end
+
+  @doc "The default unverified human actor used when a fixture doesn't need a specific one."
+  def default_actor do
+    %Actor{id: nil, type: :human, label: "owner@localhost", verified?: false, method: nil}
+  end
 end

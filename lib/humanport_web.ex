@@ -90,6 +90,7 @@ defmodule HumanportWeb do
       # HumanPort.UI.* — the domain component layer. Usage rule #21: prefer one
       # of these before reaching for a Petal primitive directly.
       import HumanPort.UI.PaneHeader
+      import HumanPort.UI.AnswerCard
 
       # Petal Components v4 primitives, imported unqualified (<.button>, <.field>, …).
       use PetalComponents

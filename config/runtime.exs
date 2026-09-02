@@ -23,6 +23,12 @@ end
 config :humanport, HumanportWeb.Endpoint,
   http: [port: String.to_integer(System.get_env("PORT", "4000"))]
 
+# D-05 — environment override for the stable tenant default set in
+# config/config.exs. Still never accepted from the wire.
+if tenant_id = System.get_env("HUMANPORT_DEFAULT_TENANT_ID") do
+  config :humanport, default_tenant_id: tenant_id
+end
+
 if config_env() == :dev do
   # Reload browser tabs when matching files change.
   config :humanport, HumanportWeb.Endpoint,
