@@ -29,6 +29,15 @@ if tenant_id = System.get_env("HUMANPORT_DEFAULT_TENANT_ID") do
   config :humanport, default_tenant_id: tenant_id
 end
 
+# D-01/D-02 — the `?wait=` long-poll ceiling. 50s sits under all three known
+# bounds (Bandit/Thousand Island's 60s read_timeout, Cloudflare's 125s proxy
+# read timeout, and the tunnel's own unbounded response time) with margin.
+# Lives in runtime config, not compile-time config, specifically so Phase 2
+# can lower it from the environment without a code change.
+config :humanport,
+  long_poll_max_wait_seconds:
+    String.to_integer(System.get_env("HUMANPORT_LONG_POLL_MAX_WAIT_SECONDS", "50"))
+
 if config_env() == :dev do
   # Reload browser tabs when matching files change.
   config :humanport, HumanportWeb.Endpoint,
