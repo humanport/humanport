@@ -1,0 +1,40 @@
+name: leak-guard
+
+# Local hooks are opt-in per clone (core.hooksPath is not cloned), so the same
+# checks run here where they cannot be skipped. GitHub's own secret scanning and
+# push protection cover provider-issued tokens; this job covers what is specific
+# to HumanPort: planning material, host addresses and confidentiality markers
+# that must never appear in the public repository.
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  leak-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Scan the tree
+        run: .githooks/leak-guard.sh --tree
+
+      - name: Scan the pull request range
+        if: github.event_name == 'pull_request'
+        run: |
+          .githooks/leak-guard.sh --range \
+            "${{ github.event.pull_request.base.sha }}" \
+            "${{ github.event.pull_request.head.sha }}"
+
+      - name: Verify the hooks are executable
+        run: |
+          for f in .githooks/leak-guard.sh .githooks/pre-commit .githooks/pre-push; do
+            test -x "$f" || { echo "::error file=$f::hook is not executable"; exit 1; }
+          done

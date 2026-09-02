@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Public repository: scan everything about to become world-readable.
+#
+# git feeds us "<local ref> <local sha> <remote ref> <remote sha>" on stdin.
+# A remote sha of all-zeros means the branch is new on the remote, so the whole
+# tree is being published for the first time and must be scanned in full.
+set -uo pipefail
+root="$(git rev-parse --show-toplevel)"
+guard="$root/.githooks/leak-guard.sh"
+zero="0000000000000000000000000000000000000000"
+status=0
+
+while read -r _local_ref local_sha _remote_ref remote_sha; do
+  [ "$local_sha" = "$zero" ] && continue          # branch deletion
+  if [ "$remote_sha" = "$zero" ]; then
+    "$guard" --range "" "$local_sha" || status=1
+  else
+    "$guard" --range "$remote_sha" "$local_sha" || status=1
+  fi
+done
+
+exit $status

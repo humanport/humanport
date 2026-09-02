@@ -14,6 +14,29 @@ of the HumanPort open-source core.
 - **Protocol interoperability stays open.** Do not move REST, OpenAPI, MCP or A2A
   capability behind a commercial boundary.
 
+## First: enable the hooks
+
+`core.hooksPath` is local configuration and is not cloned, so a fresh checkout has
+no hooks. Enable them once, before your first commit:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+This installs `leak-guard`, which refuses to commit or push anything that does not
+belong in a public repository — credential material, host addresses, and planning
+artifacts. To scan without committing:
+
+```bash
+.githooks/leak-guard.sh --tree
+```
+
+The same check runs in CI, where it cannot be skipped, and GitHub secret scanning
+with push protection is enabled on this repository. If the guard flags a line that
+is genuinely meant to be public, append the marker `leak-guard:allow` to it. If a
+real secret ever reaches a commit, rotate it — removing the line does not unpublish
+it.
+
 ## Development
 
 ```bash
