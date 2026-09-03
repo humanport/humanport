@@ -1,6 +1,18 @@
 import Config
 config :ash, policies: [show_policy_breakdowns?: true], disable_async?: true
 
+# OPS-03 Wave 0 test seam (02-VALIDATION.md) — the fixture's own team
+# domain/AUD tag, so `Humanport.Actors.CloudflareAccessToken.token_config/0`
+# (which reads these via `Application.get_env/2`) validates against exactly
+# what `Humanport.CloudflareAccessFixtures.signed_token/1` signs against.
+# `cf_access_jwks_strategy` is read at COMPILE time
+# (`Application.compile_env/3` in `CloudflareAccessToken`) — pointing it at
+# the stub means no network call ever reaches Cloudflare in a test run.
+config :humanport,
+  cf_access_team_domain: "test-team",
+  cf_access_aud: "test-aud-tag",
+  cf_access_jwks_strategy: Humanport.CloudflareAccessFixtures.StubJwksStrategy
+
 # Configure your database
 #
 # The MIX_TEST_PARTITION environment variable can be used
