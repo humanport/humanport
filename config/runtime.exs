@@ -23,9 +23,29 @@ end
 config :humanport, HumanportWeb.Endpoint,
   http: [port: String.to_integer(System.get_env("PORT", "4000"))]
 
+# Blank means absent — the precondition for every variable `compose.yaml`
+# hands to the container. Compose delivers them with `${VAR:-}`
+# interpolation, which is the only form that reads a value out of
+# `--env-file` (the bare `KEY:` form resolves from the deploying shell's own
+# environment instead, and `--env-file` values "are never directly injected
+# into containers", so it cannot carry the documented deploy command). That
+# form renders an unconfigured variable as the EMPTY STRING, and `""` is
+# truthy in Elixir — so every reader below must be told that blank and
+# absent are the same thing, or shipping a variable in `compose.yaml` turns
+# a default into a boot crash (`String.to_integer("")`) or, worse, into a
+# silently empty setting.
+#
+# This is the general rule the 2026-09-03 Access finding produced, not a
+# special case: a variable may not be added to `compose.yaml` until its
+# reader here is blank-safe.
+blank_to_nil = fn
+  nil -> nil
+  value -> if String.trim(value) == "", do: nil, else: value
+end
+
 # D-05 — environment override for the stable tenant default set in
 # config/config.exs. Still never accepted from the wire.
-if tenant_id = System.get_env("HUMANPORT_DEFAULT_TENANT_ID") do
+if tenant_id = blank_to_nil.(System.get_env("HUMANPORT_DEFAULT_TENANT_ID")) do
   config :humanport, default_tenant_id: tenant_id
 end
 
@@ -36,17 +56,19 @@ end
 # has other reasons to differ, and would make the fork untestable under
 # `mix test`. `compose.yaml` is the one artifact a bare `docker compose up`
 # (self-hosting, OPS-01/D-12) and this application's production deployment
-# share (`compose.yaml`'s own comment says so) — it carries no Access
-# configuration, and `config/config.exs`'s compile-time default
+# share (`compose.yaml`'s own comment says so) — it declares the Access
+# variables but leaves them blank unless the deployment supplies them, and
+# `config/config.exs`'s compile-time default
 # (`actor_resolver: Humanport.Actors.Resolvers.Env`) is NEVER touched here.
-# Only when `HUMANPORT_CF_ACCESS_TEAM_DOMAIN` is present does this override
-# fire — so a plain `docker compose up` with nothing exported keeps
-# producing byte-for-byte the Phase 1 behaviour, proved by running the
-# whole suite with both variables explicitly unset (02-01-PLAN.md's own
-# verify command).
-if team_domain = System.get_env("HUMANPORT_CF_ACCESS_TEAM_DOMAIN") do
+# Only when `HUMANPORT_CF_ACCESS_TEAM_DOMAIN` holds a NON-BLANK value does
+# this override fire — so a plain `docker compose up` with nothing exported
+# keeps producing byte-for-byte the Phase 1 behaviour, proved by running the
+# whole suite with both variables explicitly unset AND explicitly blank
+# (02-01-PLAN.md's own verify command, extended by the blank case that
+# `${VAR:-}` interpolation made reachable).
+if team_domain = blank_to_nil.(System.get_env("HUMANPORT_CF_ACCESS_TEAM_DOMAIN")) do
   aud_tag =
-    System.get_env("HUMANPORT_CF_ACCESS_AUD") ||
+    blank_to_nil.(System.get_env("HUMANPORT_CF_ACCESS_AUD")) ||
       raise """
       environment variable HUMANPORT_CF_ACCESS_AUD is missing.
 
@@ -68,9 +90,16 @@ if team_domain = System.get_env("HUMANPORT_CF_ACCESS_TEAM_DOMAIN") do
     # `System.get_env(...) |> String.to_integer()` idiom already used for
     # `HUMANPORT_LONG_POLL_MAX_WAIT_SECONDS` below. Five minutes by default,
     # stated in `CloudflareAccessJwksStrategy`'s own moduledoc.
+    # Read through `blank_to_nil` for the same reason as the two above:
+    # `compose.yaml` declares this variable as `${VAR:-}`, and
+    # `System.get_env(var, "300")` returns the EMPTY STRING rather than its
+    # default when a variable is set-but-blank — `String.to_integer("")`
+    # would then raise at boot on an instance that simply never configured
+    # a refresh interval.
     cf_access_jwks_refresh_ms:
-      String.to_integer(System.get_env("HUMANPORT_CF_ACCESS_JWKS_REFRESH_SECONDS", "300")) *
-        1_000
+      String.to_integer(
+        blank_to_nil.(System.get_env("HUMANPORT_CF_ACCESS_JWKS_REFRESH_SECONDS")) || "300"
+      ) * 1_000
 end
 
 # D-01/D-02 — the `?wait=` long-poll ceiling. 50s sits under all three known
@@ -80,7 +109,9 @@ end
 # can lower it from the environment without a code change.
 config :humanport,
   long_poll_max_wait_seconds:
-    String.to_integer(System.get_env("HUMANPORT_LONG_POLL_MAX_WAIT_SECONDS", "50"))
+    String.to_integer(
+      blank_to_nil.(System.get_env("HUMANPORT_LONG_POLL_MAX_WAIT_SECONDS")) || "50"
+    )
 
 if config_env() == :dev do
   # Reload browser tabs when matching files change.
@@ -112,7 +143,7 @@ if config_env() == :prod do
   config :humanport, Humanport.Repo,
     # ssl: true,
     url: database_url,
-    pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10"),
+    pool_size: String.to_integer(blank_to_nil.(System.get_env("POOL_SIZE")) || "10"),
     # For machines with several cores, consider starting multiple pools of `pool_size`
     # pool_count: 4,
     socket_options: maybe_ipv6

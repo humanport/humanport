@@ -116,7 +116,7 @@ ones that matter for your situation.
 | `HUMANPORT_DEFAULT_TENANT_ID` | `config/config.exs` / `config/runtime.exs` | a fixed placeholder UUID | Overrides the single tenant every request in this version is written under. There is no multi-tenancy logic behind this in Phase 1 — the column exists so a later phase does not have to retrofit it. |
 | `ECTO_IPV6` | `config/runtime.exs` | unset (IPv4) | Set to `true` or `1` if your database is only reachable over IPv6. |
 | `POOL_SIZE` | `config/runtime.exs` | `10` | The Ecto connection pool size. |
-| `HUMANPORT_CF_ACCESS_TEAM_DOMAIN` | `config/runtime.exs` | unset — `Resolvers.Env`, `verified? false` | The Cloudflare Access team name (just the name, not a URL — the application derives both the JWKS URL and the expected issuer from this one value, so the two can never disagree). Setting this swaps the actor resolver to `Resolvers.CloudflareAccess` and makes `HUMANPORT_CF_ACCESS_AUD` required. **Read the paragraph below before setting this.** |
+| `HUMANPORT_CF_ACCESS_TEAM_DOMAIN` | `config/runtime.exs` | unset or blank — `Resolvers.Env`, `verified? false` | The Cloudflare Access team name (just the name, not a URL — the application derives both the JWKS URL and the expected issuer from this one value, so the two can never disagree). Setting this to a **non-blank** value swaps the actor resolver to `Resolvers.CloudflareAccess` and makes `HUMANPORT_CF_ACCESS_AUD` required. Blank counts as unset, because `compose.yaml` declares this variable as `${VAR:-}` — the only Compose form that reads a value out of `--env-file` — and that renders as an empty string whenever nothing is configured. **Read the paragraph below before setting this.** |
 | `HUMANPORT_CF_ACCESS_AUD` | `config/runtime.exs` | required if the team domain is set; unused otherwise | The AUD tag of THIS instance's own Cloudflare Access application, copied from its dashboard. Without it, a token minted for any other Access application in the same Cloudflare account would be accepted — the application refuses to start with a team domain set and no AUD tag, rather than starting half-configured. |
 
 ### Setting `HUMANPORT_CF_ACCESS_TEAM_DOMAIN` changes what an unauthenticated request gets
@@ -148,8 +148,21 @@ matters because migrations run at container start, before the server starts
 accepting traffic — see [Environment variables](#environment-variables) and
 `rel/overlays/bin/migrate`); it answers 503 with a machine-readable
 `reason` — `:migrations_pending` or `{:db_unreachable, ...}` — otherwise.
-Neither is reachable over the tunnel; both are host-local only, reached the
-same way the Compose healthcheck reaches them below.
+**Neither endpoint restricts who may call it, and this application does not
+make them host-local.** The `:health` router pipeline is `plug :accepts,
+["json"]` and nothing else — no origin check, no loopback guard, and
+deliberately no actor resolver, because these routes have to keep answering
+when identity resolution is itself what is broken. On the reference
+deployment they are unreachable from the internet only because Cloudflare
+Access sits in front of the whole hostname with no path carve-out, which is
+edge configuration living outside this repository. Scope Access to exclude
+`/health` or `/ready` — a tempting change, since they are genuinely useful
+to an external uptime monitor — or put a different reverse proxy in front of
+this origin, and `/ready`'s `reason` payload (which can carry a full
+`Postgrex.Error` message) becomes readable by anyone who can resolve the
+hostname. If you want the host-local guarantee to hold regardless of your
+edge, enforce it at your proxy or add a `conn.remote_ip` check; do not infer
+it from this application's behaviour.
 
 `compose.yaml`'s `app` service carries a `healthcheck:` that calls this same
 readiness check — plus a bare check that the application's own listener

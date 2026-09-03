@@ -59,6 +59,8 @@ defmodule HumanportWeb.Plugs.ResolveActor do
   # `lib/humanport_web` -> `lib/humanport` -> `lib/humanport_web` layering
   # loop) in `Resolvers.CloudflareAccess`'s own moduledoc and socket clause
   # — keep both literals in sync if this ever changes.
+  require Logger
+
   @actor_session_key "hp_resolved_actor"
 
   @impl Plug
@@ -72,7 +74,9 @@ defmodule HumanportWeb.Plugs.ResolveActor do
         |> assign(:actor, actor)
         |> snapshot_actor_for_liveview(actor)
 
-      {:error, _reason} ->
+      {:error, reason} ->
+        log_refusal(reason, "HTTP #{conn.method} #{conn.request_path}")
+
         conn
         |> put_status(:unauthorized)
         |> json(
@@ -94,9 +98,24 @@ defmodule HumanportWeb.Plugs.ResolveActor do
       {:ok, actor} ->
         {:cont, Phoenix.Component.assign(socket, :actor, actor)}
 
-      {:error, _reason} ->
+      {:error, reason} ->
+        log_refusal(reason, "LiveView mount")
         raise HumanportWeb.UnauthorizedError
     end
+  end
+
+  # The refusal REASON is server-side only, and that split is deliberate on
+  # both sides. The response body stays opaque — a caller learns that its
+  # identity was not resolved, never which check rejected it, because that
+  # detail is a probing aid (D-02 keeps every rejection uniform). But
+  # discarding the reason entirely, as this plug did until 2026-09-03, left
+  # the operator with a bare 401 and no signal at all: diagnosing a refused
+  # service token meant reading the resolver's source and guessing, because
+  # nothing anywhere recorded which of "no token present", "signature",
+  # "aud", "iss" or "no usable claim" had fired. Log it once, at the only
+  # place that has it.
+  defp log_refusal(reason, where) do
+    Logger.warning("actor resolution refused (#{where}): #{inspect(reason)}")
   end
 
   defp resolver, do: Application.fetch_env!(:humanport, :actor_resolver)

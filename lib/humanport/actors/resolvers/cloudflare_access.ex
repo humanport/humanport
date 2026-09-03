@@ -80,6 +80,8 @@ defmodule Humanport.Actors.Resolvers.CloudflareAccess do
 
   @behaviour Humanport.Actors.Resolver
 
+  require Logger
+
   alias Humanport.Actors.Actor
   alias Humanport.Actors.CloudflareAccessToken
 
@@ -107,15 +109,52 @@ defmodule Humanport.Actors.Resolvers.CloudflareAccess do
 
   defp verify_and_map(:error), do: {:error, :missing_token}
 
+  # The three refusal stages below all normalize to the same `:invalid_token`
+  # on the wire, and that uniformity is deliberate (D-02) — but it also made
+  # them indistinguishable to the operator, who then cannot tell a signature
+  # problem from a token that verified fine and simply carried no claim this
+  # resolver knows how to use. Each stage therefore says which one it was,
+  # server-side. What is logged is deliberately narrow: claim NAMES, never
+  # claim values, and never the token itself. Joken's own failure shape does
+  # name the offending claim (and its value, e.g. an `iss` URL), which is
+  # diagnostic rather than secret — an Access JWT's issuer and audience are
+  # both public, and the signature that matters is not in the error.
   defp verify_and_map({:ok, raw_jwt}) do
-    with {:ok, claims} <- CloudflareAccessToken.verify_and_validate(raw_jwt),
-         :ok <- ensure_scoped_correctly(claims),
-         {:ok, actor} <- actor_from_claims(claims) do
-      {:ok, actor}
-    else
-      {:error, _reason} = error -> normalize_error(error)
+    case CloudflareAccessToken.verify_and_validate(raw_jwt) do
+      {:ok, claims} ->
+        case ensure_scoped_correctly(claims) do
+          :ok -> map_claims(claims)
+          error -> refuse("iss and aud are not both present", claim_names(claims), error)
+        end
+
+      error ->
+        refuse("signature or claim validation failed", inspect(error), error)
     end
   end
+
+  defp map_claims(claims) do
+    case actor_from_claims(claims) do
+      {:ok, actor} ->
+        {:ok, actor}
+
+      error ->
+        refuse(
+          "no usable identity claim (neither common_name nor email)",
+          claim_names(claims),
+          error
+        )
+    end
+  end
+
+  defp refuse(stage, detail, error) do
+    Logger.warning("cloudflare access token refused — #{stage}: #{detail}")
+    normalize_error(error)
+  end
+
+  defp claim_names(claims) when is_map(claims),
+    do: claims |> Map.keys() |> Enum.sort() |> inspect()
+
+  defp claim_names(other), do: inspect(other)
 
   defp extract_from_conn(conn) do
     case Plug.Conn.get_req_header(conn, @header) do
@@ -139,22 +178,53 @@ defmodule Humanport.Actors.Resolvers.CloudflareAccess do
   # credential.
   defp resolve_from_session(%{} = session) do
     case Map.get(session, @actor_session_key) do
-      %{"verified" => true} = snapshot -> {:ok, actor_from_snapshot(snapshot)}
+      %{"verified" => true} = snapshot -> actor_from_snapshot(snapshot)
       _ -> {:error, :missing_token}
     end
   end
 
   defp resolve_from_session(_session), do: {:error, :missing_token}
 
+  # D-02 says every rejection here returns `{:error, atom}`, so
+  # `ResolveActor.on_mount/4` can turn it into a clean 401. A bare
+  # `String.to_existing_atom/1` on session-derived strings broke that promise
+  # in the one direction nobody notices until it happens: it raises
+  # `ArgumentError`, which is a 500, not a 401. Every value a snapshot can
+  # carry today does correspond to an existing atom — but only because two
+  # independent lists (this resolver's own outputs and `Humanport.Audit.Event`'s
+  # `one_of` vocabularies) happen to stay in sync, not by construction. A
+  # session cookie outliving a deploy that drops a value, or any future
+  # divergence between the snapshot writer and the atom table, would turn a
+  # routine 401 into a 500 for every holder of that stale cookie. Matching the
+  # vocabulary explicitly makes the guarantee structural instead of incidental.
+  # Found by the Phase 2 code review (02-REVIEW.md WR-03).
+  @snapshot_types ~w(human agent service system)
+  @snapshot_methods ~w(sso service_token magic_link oidc api_key)
+
   defp actor_from_snapshot(snapshot) do
-    %Actor{
-      id: snapshot["id"],
-      type: String.to_existing_atom(snapshot["type"]),
-      label: snapshot["label"],
-      verified?: true,
-      method: snapshot["method"] && String.to_existing_atom(snapshot["method"])
-    }
+    with {:ok, type} <- known_atom(snapshot["type"], @snapshot_types),
+         {:ok, method} <- known_atom_or_nil(snapshot["method"], @snapshot_methods) do
+      {:ok,
+       %Actor{
+         id: snapshot["id"],
+         type: type,
+         label: snapshot["label"],
+         verified?: true,
+         method: method
+       }}
+    end
   end
+
+  defp known_atom(value, allowed) when is_binary(value) do
+    if value in allowed,
+      do: {:ok, String.to_existing_atom(value)},
+      else: {:error, :invalid_token}
+  end
+
+  defp known_atom(_value, _allowed), do: {:error, :invalid_token}
+
+  defp known_atom_or_nil(nil, _allowed), do: {:ok, nil}
+  defp known_atom_or_nil(value, allowed), do: known_atom(value, allowed)
 
   defp ensure_scoped_correctly(%{"iss" => _, "aud" => _}), do: :ok
   defp ensure_scoped_correctly(_claims), do: {:error, :invalid_token}
