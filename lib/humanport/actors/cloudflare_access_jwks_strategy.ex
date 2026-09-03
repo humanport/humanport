@@ -17,12 +17,30 @@ defmodule Humanport.Actors.CloudflareAccessJwksStrategy do
   `fetch_signers/3` regardless of demand — this is what actually bounds
   D-03's revocation window, not `time_interval` alone.
 
-  Five minutes, chosen deliberately rather than defaulted: Cloudflare's own
-  default key-rotation cadence is six weeks with a 7-day overlap for the
-  previous key, so this interval only has to be short relative to a
-  genuine, out-of-band revocation, not relative to routine rotation. The
-  accepted cost, stated plainly: a compromised/revoked Access key can still
-  authenticate for up to five minutes after revocation.
+  Five minutes is the DEFAULT, chosen deliberately rather than inherited
+  from the library: Cloudflare's own default key-rotation cadence is six
+  weeks with a 7-day overlap for the previous key, so this interval only
+  has to be short relative to a genuine, out-of-band revocation, not
+  relative to routine rotation. The accepted cost, stated plainly: a
+  compromised/revoked Access key can still authenticate for up to
+  `refresh_interval_ms/0`'s configured value (five minutes unless
+  overridden) after revocation. 02-02-PLAN.md Task 3 makes the number a
+  runtime setting — `Application.get_env(:humanport,
+  :cf_access_jwks_refresh_ms)`, set in `config/runtime.exs` from
+  `HUMANPORT_CF_ACCESS_JWKS_REFRESH_SECONDS` (default 300s) — rather than a
+  compiled-in literal, so the window can be tightened for a given
+  deployment without a rebuild.
+
+  The forced refresh is OBSERVABLE, because "it fires" is the entire claim
+  D-03 rests on: `handle_info(:force_refresh, state)` emits
+  `[:humanport, :cloudflare_access_jwks, :force_refresh]` via `:telemetry`
+  UNCONDITIONALLY, before calling `fetch_signers/3` — so the event fires
+  whether or not the fetch itself succeeds, and a test can attach a handler
+  and assert it fires more than once with a short configured interval and
+  no token ever presented. A one-shot timer that never re-arms would pass
+  a "did it fire" test and leave the window unbounded after the first
+  interval; asserting at least two firings is what actually proves
+  `handle_info/2` re-arms itself.
 
   `first_fetch_sync: false` is deliberate, not an oversight — `true` would
   block application start on a network call to Cloudflare. The alternative
@@ -39,8 +57,7 @@ defmodule Humanport.Actors.CloudflareAccessJwksStrategy do
 
   use JokenJwks.DefaultStrategyTemplate
 
-  # D-03 — the accepted revocation-exposure window. See the moduledoc.
-  @force_refresh_ms 5 * 60 * 1_000
+  @force_refresh_telemetry_event [:humanport, :cloudflare_access_jwks, :force_refresh]
 
   # Placed immediately after `use`, before any other function definition in
   # this module, so this clause stays grouped with the template's own
@@ -56,8 +73,9 @@ defmodule Humanport.Actors.CloudflareAccessJwksStrategy do
   # from either of those.
   @doc false
   def handle_info(:force_refresh, state) do
+    :telemetry.execute(@force_refresh_telemetry_event, %{count: 1}, %{module: __MODULE__})
     _ = JokenJwks.DefaultStrategyTemplate.fetch_signers(__MODULE__, state[:jwks_url], state)
-    Process.send_after(__MODULE__, :force_refresh, @force_refresh_ms)
+    Process.send_after(__MODULE__, :force_refresh, refresh_interval_ms())
     {:noreply, state}
   end
 
@@ -77,9 +95,9 @@ defmodule Humanport.Actors.CloudflareAccessJwksStrategy do
     # own docs: "Timers are not automatically cancelled when dest is an
     # atom [because] resolution is done on delivery"), so scheduling
     # against `__MODULE__` here — before the process holding that name
-    # exists — is safe: by the time this timer fires, five minutes later,
-    # the GenServer has long since registered.
-    Process.send_after(__MODULE__, :force_refresh, @force_refresh_ms)
+    # exists — is safe: by the time this timer fires, `refresh_interval_ms/0`
+    # later, the GenServer has long since registered.
+    Process.send_after(__MODULE__, :force_refresh, refresh_interval_ms())
 
     Keyword.merge(opts,
       jwks_url: jwks_url(team_domain),
@@ -89,6 +107,21 @@ defmodule Humanport.Actors.CloudflareAccessJwksStrategy do
       http_delay_per_retry: 500
     )
   end
+
+  @doc """
+  D-03's accepted revocation-exposure window, in milliseconds. Read fresh
+  on every call (never cached in a module attribute) so a test can override
+  it via `Application.put_env/3` without recompiling, and so
+  `config/runtime.exs`'s `HUMANPORT_CF_ACCESS_JWKS_REFRESH_SECONDS`
+  override needs no code change to take effect. The literal `300_000`
+  fallback here — not only in `config/runtime.exs` — is what keeps this
+  module's own default honest in any environment that reaches it without
+  going through `config/runtime.exs`'s env-var gate (`config/test.exs`
+  configures `cf_access_team_domain` directly, bypassing that gate, so this
+  module IS supervised in `mix test` and must still have a sane default).
+  """
+  def refresh_interval_ms,
+    do: Application.get_env(:humanport, :cf_access_jwks_refresh_ms, 5 * 60 * 1_000)
 
   defp jwks_url(team_domain),
     do: Humanport.Actors.CloudflareAccessToken.issuer(team_domain) <> "/cdn-cgi/access/certs"

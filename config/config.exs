@@ -109,6 +109,23 @@ config :logger, :default_formatter,
 # Use Jason for JSON parsing in Phoenix
 config :phoenix, :json_library, Jason
 
+# OPS-03 (02-02-PLAN.md Task 3 deviation, Rule 1) — `joken_jwks`'s
+# `HttpFetcher` (`deps/joken_jwks/lib/joken_jwks/http_fetcher.ex`) hardcodes
+# its OWN fallback default as `Tesla.Adapter.Hackney`, NOT Tesla's actual
+# library-wide default (`Tesla.Adapter.Httpc`) — `02-RESEARCH.md` conflated
+# the two and concluded no adapter config was needed. `hackney` is not, and
+# per AGENTS.md's Phase 2 note must not become, a dependency of this
+# project, so every real JWKS fetch attempt (the demand-triggered
+# `time_interval` check, and `CloudflareAccessJwksStrategy`'s forced
+# refresh) would crash with `UndefinedFunctionError` the first time it ran
+# — including in production, where it would mean the JWKS cache never
+# populates and the owner locks himself out the moment Access is
+# configured. This line makes Tesla's OWN default (`Httpc`, ships with
+# Tesla, uses OTP's `:httpc`/`:inets`/`:ssl` — see `mix.exs`
+# `extra_applications`) the one `joken_jwks` actually picks up, with zero
+# new dependencies.
+config :tesla, adapter: Tesla.Adapter.Httpc
+
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
 import_config "#{config_env()}.exs"

@@ -23,7 +23,11 @@ defmodule Humanport.MixProject do
   def application do
     [
       mod: {Humanport.Application, []},
-      extra_applications: [:logger, :runtime_tools]
+      # :inets/:ssl — OPS-03 (02-02-PLAN.md Task 3 deviation): required by
+      # Tesla.Adapter.Httpc (config/config.exs's `config :tesla, adapter:`),
+      # which `joken_jwks`'s JWKS fetch uses over HTTPS. Neither starts
+      # automatically as a transitive dependency's own extra_application.
+      extra_applications: [:logger, :runtime_tools, :inets, :ssl]
     ]
   end
 

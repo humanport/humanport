@@ -61,7 +61,16 @@ if team_domain = System.get_env("HUMANPORT_CF_ACCESS_TEAM_DOMAIN") do
   config :humanport,
     actor_resolver: Humanport.Actors.Resolvers.CloudflareAccess,
     cf_access_team_domain: team_domain,
-    cf_access_aud: aud_tag
+    cf_access_aud: aud_tag,
+    # D-03 (02-02-PLAN.md Task 3) — the accepted revocation-exposure window
+    # for the forced JWKS refresh (`CloudflareAccessJwksStrategy`), read at
+    # runtime rather than compiled in, following the same
+    # `System.get_env(...) |> String.to_integer()` idiom already used for
+    # `HUMANPORT_LONG_POLL_MAX_WAIT_SECONDS` below. Five minutes by default,
+    # stated in `CloudflareAccessJwksStrategy`'s own moduledoc.
+    cf_access_jwks_refresh_ms:
+      String.to_integer(System.get_env("HUMANPORT_CF_ACCESS_JWKS_REFRESH_SECONDS", "300")) *
+        1_000
 end
 
 # D-01/D-02 — the `?wait=` long-poll ceiling. 50s sits under all three known
