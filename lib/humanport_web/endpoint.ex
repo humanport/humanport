@@ -11,6 +11,28 @@ defmodule HumanportWeb.Endpoint do
     same_site: "Lax"
   ]
 
+  # OPS-03 (02-02-PLAN.md Task 1) — `:cookies` is NOT a valid `connect_info`
+  # key. 02-RESEARCH.md's own Pattern 1 and this plan's action text assumed
+  # it was; it is not, confirmed two ways: (1) `Phoenix.Socket.Transport
+  # .load_config/1` raises `ArgumentError` at compile time for any key
+  # outside `:peer_data, :trace_context_headers, :x_headers, :user_agent,
+  # :sec_websocket_headers, :uri, {:session, config}` plus custom keyword
+  # pairs; (2) `Phoenix.Endpoint`'s own "Connect info" moduledoc section
+  # states it outright — "you can't access cookies and other headers in
+  # your socket" — a deliberate cross-site-WebSocket-hijack defense, not an
+  # omission. A malicious page can open a WS connection to this origin and
+  # the browser will submit the visitor's cookies; if Phoenix handed those
+  # to the socket unchecked, that page could ride the visitor's Access
+  # session. This is why only `:session` (CSRF-token-protected) is listed
+  # below.
+  #
+  # `HumanportWeb.Plugs.ResolveActor.call/2` snapshots the resolved actor
+  # into THIS session on every successful dead-render resolve;
+  # `Resolvers.CloudflareAccess`'s socket clause reads that snapshot back
+  # via `get_connect_info(socket, :session)` on reconnect — see both
+  # modules' moduledocs for the full mechanism and why trusting the
+  # snapshot is sound (Access re-checks at the edge on every reconnect
+  # regardless).
   socket "/live", Phoenix.LiveView.Socket,
     websocket: [connect_info: [session: @session_options]],
     longpoll: [connect_info: [session: @session_options]]

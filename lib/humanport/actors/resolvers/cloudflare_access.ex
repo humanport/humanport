@@ -11,10 +11,34 @@ defmodule Humanport.Actors.Resolvers.CloudflareAccess do
   turns that into an HTTP 401 or a terminated LiveView mount (the WR-05
   fix); this module never renders a response and never redirects.
 
-  D-13 — the token arrives as the `Cf-Access-Jwt-Assertion` request header
-  (checked first — `Plug.Conn.get_req_header/2` matches the header name
+  D-13 — for a plain HTTP request (`resolve/1` on a `%Plug.Conn{}`), the
+  token arrives as the `Cf-Access-Jwt-Assertion` request header (checked
+  first — `Plug.Conn.get_req_header/2` matches the header name
   case-insensitively) or the `CF_Authorization` cookie (checked second —
   the cookie name is exactly as Cloudflare sets it, case-sensitive).
+
+  02-02-PLAN.md Task 1 — a LiveView socket (`resolve/1` on a
+  `%Phoenix.LiveView.Socket{}`) is a DIFFERENT case, not a variant of the
+  same extraction: Phoenix does not expose the `CF_Authorization` cookie
+  (or any raw cookie) to a socket's `connect_info` at all — `:cookies` is
+  not a valid `connect_info` key in the installed Phoenix/LiveView version,
+  confirmed by reading `Phoenix.Socket.Transport.load_config/1` and the
+  endpoint moduledoc's own "you can't access cookies and other headers in
+  your socket" note (a deliberate cross-site-WebSocket-hijack defense).
+  `Phoenix.LiveView.get_connect_info/2` does not support `:session` either
+  (confirmed by reading its `conn_connect_info/2` clauses) — the session
+  reaches a mount as `on_mount/4`'s own THIRD ARGUMENT instead, which
+  `HumanportWeb.Plugs.ResolveActor.on_mount/4` stashes into
+  `socket.private[:hp_session]` before calling this resolver (see that
+  module's moduledoc). This clause reads the resolved-actor SNAPSHOT
+  `ResolveActor.call/2` writes into that same Plug session on every
+  successful dead-render resolve (`@actor_session_key` below, kept in sync
+  with that module's own literal). Trusting the snapshot is not weaker than
+  re-verifying a raw JWT would have been: Cloudflare Access re-checks at
+  the EDGE on every request, including a websocket reconnect, before it
+  ever reaches this application (D-03's own framing — the application is
+  the *second* line of defence) — trusting a snapshot this server itself
+  wrote, signed by its own `SECRET_KEY_BASE`, moments earlier, is sound.
 
   D-05 — the `aud` claim is checked, inside
   `Humanport.Actors.CloudflareAccessToken`, against this application's own
@@ -42,11 +66,16 @@ defmodule Humanport.Actors.Resolvers.CloudflareAccess do
   signature/issuer/audience/expiry check; the header only says "here is a
   token to verify."
 
-  The `common_name` (service-token, D-01) claims branch is Phase 2's
-  Plan 02-02 — this tracer proves the human/`email` path end to end first.
-  A correctly-signed, correctly-scoped token that carries neither `email`
-  nor a recognised claims shape is refused (`:invalid_token`), not
-  resolved to a service actor and not left to crash the request.
+  D-01 — a service-token JWT carries `common_name` (the service token's own
+  Client ID) instead of `email`; that is Cloudflare's OWN distinction, not
+  ours, checked here purely by which key is present on the VERIFIED claims
+  map — never by a caller-supplied "I am a service" flag, a header, or a
+  body field. `common_name` is checked first (`actor_from_claims/1`'s
+  clause order below), so a token carrying both keys resolves as a
+  service actor; nothing in this codebase produces such a token, but the
+  order is deliberate rather than incidental. A correctly-signed,
+  correctly-scoped token that carries neither `common_name` nor `email` is
+  refused (`:invalid_token`), never resolved to some default actor.
   """
 
   @behaviour Humanport.Actors.Resolver
@@ -57,6 +86,12 @@ defmodule Humanport.Actors.Resolvers.CloudflareAccess do
   @header "cf-access-jwt-assertion"
   @cookie "CF_Authorization"
 
+  # Cross-referenced with `HumanportWeb.Plugs.ResolveActor`'s own
+  # `@actor_session_key` literal — see both moduledocs. Not shared as a
+  # function call to avoid a `lib/humanport` -> `lib/humanport_web` ->
+  # `lib/humanport` layering loop between the two.
+  @actor_session_key "hp_resolved_actor"
+
   @impl true
   def resolve(%Plug.Conn{} = conn) do
     conn
@@ -64,10 +99,10 @@ defmodule Humanport.Actors.Resolvers.CloudflareAccess do
     |> verify_and_map()
   end
 
-  def resolve(%Phoenix.LiveView.Socket{} = socket) do
-    socket
-    |> extract_from_socket()
-    |> verify_and_map()
+  def resolve(%Phoenix.LiveView.Socket{private: private}) do
+    private
+    |> Map.get(:hp_session, %{})
+    |> resolve_from_session()
   end
 
   defp verify_and_map(:error), do: {:error, :missing_token}
@@ -98,20 +133,52 @@ defmodule Humanport.Actors.Resolvers.CloudflareAccess do
     end
   end
 
-  defp extract_from_socket(socket) do
-    case Phoenix.LiveView.get_connect_info(socket, :cookies) do
-      %{@cookie => raw_jwt} -> {:ok, raw_jwt}
-      _ -> :error
+  # `session` is `nil` when the socket's `connect_info` carries no session
+  # at all (declared without `session: ...`, or a request with no cookie
+  # attached) — never crash on that, refuse it like any other missing
+  # credential.
+  defp resolve_from_session(%{} = session) do
+    case Map.get(session, @actor_session_key) do
+      %{"verified" => true} = snapshot -> {:ok, actor_from_snapshot(snapshot)}
+      _ -> {:error, :missing_token}
     end
+  end
+
+  defp resolve_from_session(_session), do: {:error, :missing_token}
+
+  defp actor_from_snapshot(snapshot) do
+    %Actor{
+      id: snapshot["id"],
+      type: String.to_existing_atom(snapshot["type"]),
+      label: snapshot["label"],
+      verified?: true,
+      method: snapshot["method"] && String.to_existing_atom(snapshot["method"])
+    }
   end
 
   defp ensure_scoped_correctly(%{"iss" => _, "aud" => _}), do: :ok
   defp ensure_scoped_correctly(_claims), do: {:error, :invalid_token}
 
+  # D-01 — the service-token clause. Checked FIRST: a service token's
+  # "common_name" is its own Client ID, never a client-supplied flag. Order
+  # matters only in the sense that it is deliberate, not because the two
+  # clauses could otherwise collide — a genuine Cloudflare Access token
+  # carries exactly one of "common_name" or "email", never neither and (per
+  # Cloudflare's own token shapes) never a reason to prefer one over the
+  # other if it somehow carried both.
+  defp actor_from_claims(%{"common_name" => client_id} = claims) do
+    {:ok,
+     %Actor{
+       id: claims["sub"],
+       type: :service,
+       label: client_id,
+       verified?: true,
+       method: :service_token
+     }}
+  end
+
   # Cloudflare's OWN distinction, not ours: a service-token JWT carries
-  # "common_name" instead of "email" — that branch is Plan 02-02's; this
-  # tracer implements the human/email path only, and refuses (rather than
-  # crashes on) anything else.
+  # "common_name" instead of "email" (clause above).
   defp actor_from_claims(%{"email" => email} = claims) do
     {:ok,
      %Actor{
