@@ -57,7 +57,38 @@ defmodule Humanport.Release do
   @spec ready? :: :ok | {:error, term()}
   def ready? do
     with :ok <- db_reachable?(),
-         :ok <- migrations_up?() do
+         :ok <- migrations_up?(),
+         :ok <- access_verifier_armed?() do
+      :ok
+    end
+  end
+
+  @doc false
+  # D-06, extended on 2026-09-03 by measuring the thing rather than trusting
+  # it. On an instance running the Cloudflare Access resolver, the key set is
+  # fetched ASYNCHRONOUSLY at startup and took ~60 seconds on the reference
+  # host. `/ready` answered 200 throughout that window while every
+  # service-token request was refused `:no_signers_fetched` — so readiness
+  # was making a promise the application could not yet keep, which is the
+  # exact wording the moduledoc above uses for why migrations are part of
+  # this check. `ops/server/redeploy-ohne-verlust.sh` waits for `/ready` and
+  # then immediately goes in through the front door; it could not pass, and
+  # the failure looked like a broken agent path rather than a young one.
+  #
+  # Scoped narrowly on purpose: an instance on the environment resolver
+  # (self-hosting, OPS-01) has no key set to wait for and is unaffected —
+  # this must not turn a plain `docker compose up` into a deployment that
+  # never reports ready.
+  def access_verifier_armed? do
+    if Application.get_env(:humanport, :actor_resolver) ==
+         Humanport.Actors.Resolvers.CloudflareAccess do
+      case JokenJwks.DefaultStrategyTemplate.EtsCache.get_signers(
+             Humanport.Actors.CloudflareAccessJwksStrategy
+           ) do
+        [signers: signers] when is_map(signers) and map_size(signers) > 0 -> :ok
+        _ -> {:error, :access_key_set_not_fetched}
+      end
+    else
       :ok
     end
   end

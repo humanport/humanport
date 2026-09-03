@@ -62,6 +62,37 @@ defmodule Humanport.ReleaseTest do
     end
   end
 
+  describe "access_verifier_armed?/0 — readiness must not promise what the verifier cannot yet keep" do
+    test "an instance on the environment resolver has no key set to wait for" do
+      # Self-hosting (OPS-01) must not be turned into a deployment that never
+      # reports ready. The test environment runs Resolvers.Env, so this is the
+      # default path.
+      assert Humanport.Release.access_verifier_armed?() == :ok
+    end
+
+    test "an instance on the Cloudflare Access resolver is NOT armed until its key set is fetched" do
+      # The measured failure, pinned. The key set is fetched asynchronously at
+      # startup and took ~60s on the reference host; `/ready` answered 200
+      # throughout while every service-token request was refused
+      # :no_signers_fetched. Nothing has started the JWKS strategy here, so the
+      # cache is empty — exactly the startup window.
+      previous = Application.get_env(:humanport, :actor_resolver)
+
+      Application.put_env(
+        :humanport,
+        :actor_resolver,
+        Humanport.Actors.Resolvers.CloudflareAccess
+      )
+
+      on_exit(fn -> Application.put_env(:humanport, :actor_resolver, previous) end)
+
+      assert Humanport.Release.access_verifier_armed?() ==
+               {:error, :access_key_set_not_fetched}
+
+      assert Humanport.Release.ready?() == {:error, :access_key_set_not_fetched}
+    end
+  end
+
   describe "healthcheck!/0 — raises rather than halting; also proves the listener accepts a connection" do
     test "returns :ok when the database, migrations, and a real bound listener are all reachable" do
       {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false])
