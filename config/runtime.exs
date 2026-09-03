@@ -29,6 +29,41 @@ if tenant_id = System.get_env("HUMANPORT_DEFAULT_TENANT_ID") do
   config :humanport, default_tenant_id: tenant_id
 end
 
+# OPS-03 (02-RESEARCH.md Pitfall 5) — the actor-resolver fork. Deliberately
+# a TOP-LEVEL `if`, not nested inside the `config_env() == :prod` block
+# below: nesting it there would tie a deployment concern (is Cloudflare
+# Access in front of this instance?) to a build-environment concern that
+# has other reasons to differ, and would make the fork untestable under
+# `mix test`. `compose.yaml` is the one artifact a bare `docker compose up`
+# (self-hosting, OPS-01/D-12) and this application's production deployment
+# share (`compose.yaml`'s own comment says so) — it carries no Access
+# configuration, and `config/config.exs`'s compile-time default
+# (`actor_resolver: Humanport.Actors.Resolvers.Env`) is NEVER touched here.
+# Only when `HUMANPORT_CF_ACCESS_TEAM_DOMAIN` is present does this override
+# fire — so a plain `docker compose up` with nothing exported keeps
+# producing byte-for-byte the Phase 1 behaviour, proved by running the
+# whole suite with both variables explicitly unset (02-01-PLAN.md's own
+# verify command).
+if team_domain = System.get_env("HUMANPORT_CF_ACCESS_TEAM_DOMAIN") do
+  aud_tag =
+    System.get_env("HUMANPORT_CF_ACCESS_AUD") ||
+      raise """
+      environment variable HUMANPORT_CF_ACCESS_AUD is missing.
+
+      HUMANPORT_CF_ACCESS_TEAM_DOMAIN is set, which means this instance is
+      about to start verifying Cloudflare Access tokens — but without an
+      AUD tag it would accept a valid token minted for ANY Access
+      application in the account, not just this one (D-05). Half-configured
+      must be loud, never lenient: copy the AUD tag from the Cloudflare
+      dashboard for THIS Access application and set it here.
+      """
+
+  config :humanport,
+    actor_resolver: Humanport.Actors.Resolvers.CloudflareAccess,
+    cf_access_team_domain: team_domain,
+    cf_access_aud: aud_tag
+end
+
 # D-01/D-02 — the `?wait=` long-poll ceiling. 50s sits under all three known
 # bounds (Bandit/Thousand Island's 60s read_timeout, Cloudflare's 125s proxy
 # read timeout, and the tunnel's own unbounded response time) with margin.

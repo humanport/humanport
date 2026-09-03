@@ -108,7 +108,7 @@ ones that matter for your situation.
 | Variable | Read by | Default | What it does |
 |---|---|---|---|
 | `SECRET_KEY_BASE` | `rel/overlays/bin/{migrate,server}` | generated at container start if unset | Signs and encrypts the Phoenix session cookie. If unset, a random value is generated **every time the container starts**, with a warning printed to the container logs — any session in progress does not survive a restart. Set this to a fixed, secret value (`mix phx.gen.secret`, or `openssl rand -base64 48`) for anything you intend to keep running. |
-| `HUMANPORT_ACTOR_EMAIL` | `Humanport.Actors.Resolvers.Env` | `owner@localhost` | The label recorded as the acting human for every local write, until Phase 2's access-gate integration replaces this resolver. Always recorded (and rendered) as unverified — this version never claims more confidence in an identity than it actually has. |
+| `HUMANPORT_ACTOR_EMAIL` | `Humanport.Actors.Resolvers.Env` | `owner@localhost` | The label recorded as the acting human for every local write, as long as `HUMANPORT_CF_ACCESS_TEAM_DOMAIN` (below) is unset — that is the resolver a bare `docker compose up` always uses. Always recorded (and rendered) as unverified — this version never claims more confidence in an identity than it actually has. |
 | `DATABASE_URL` | `config/runtime.exs` | set in `compose.yaml`, pointing at the `db` service | The Ecto connection string (`ecto://USER:PASS@HOST/DATABASE`). Only relevant if you are not using the bundled `db` service — for example, pointing the application at an external PostgreSQL instance. |
 | `PHX_HOST` | `config/runtime.exs` | `localhost` (set in `compose.yaml`) | The hostname the application believes it is served from. Affects generated absolute URLs; does not affect what interface it binds to. |
 | `PORT` | `config/runtime.exs` | `4000` | The port the application listens on inside the container. `compose.yaml` publishes container port 4000 to host port 4000; change both together if you need a different host port. |
@@ -116,6 +116,23 @@ ones that matter for your situation.
 | `HUMANPORT_DEFAULT_TENANT_ID` | `config/config.exs` / `config/runtime.exs` | a fixed placeholder UUID | Overrides the single tenant every request in this version is written under. There is no multi-tenancy logic behind this in Phase 1 — the column exists so a later phase does not have to retrofit it. |
 | `ECTO_IPV6` | `config/runtime.exs` | unset (IPv4) | Set to `true` or `1` if your database is only reachable over IPv6. |
 | `POOL_SIZE` | `config/runtime.exs` | `10` | The Ecto connection pool size. |
+| `HUMANPORT_CF_ACCESS_TEAM_DOMAIN` | `config/runtime.exs` | unset — `Resolvers.Env`, `verified? false` | The Cloudflare Access team name (just the name, not a URL — the application derives both the JWKS URL and the expected issuer from this one value, so the two can never disagree). Setting this swaps the actor resolver to `Resolvers.CloudflareAccess` and makes `HUMANPORT_CF_ACCESS_AUD` required. **Read the paragraph below before setting this.** |
+| `HUMANPORT_CF_ACCESS_AUD` | `config/runtime.exs` | required if the team domain is set; unused otherwise | The AUD tag of THIS instance's own Cloudflare Access application, copied from its dashboard. Without it, a token minted for any other Access application in the same Cloudflare account would be accepted — the application refuses to start with a team domain set and no AUD tag, rather than starting half-configured. |
+
+### Setting `HUMANPORT_CF_ACCESS_TEAM_DOMAIN` changes what an unauthenticated request gets
+
+This is not a footnote — read it before you export either variable above. With no Cloudflare
+configuration (the default), this instance behaves exactly as described in
+[Limits of this version](#limits-of-this-version): no login, the acting human read from an
+environment variable, everything unverified. The moment `HUMANPORT_CF_ACCESS_TEAM_DOMAIN` is
+set, that changes completely: every request — over the API and the web inbox alike — that does
+not carry a genuine, current, correctly-scoped Cloudflare Access token is refused with 401.
+That is the intended, locked behaviour (fail closed rather than fail open), not a defect — but
+it means setting this variable on an instance that is NOT actually sitting behind a configured
+Cloudflare Access application in front of it will lock out every request, including your own.
+If that happens, the recovery is unsetting `HUMANPORT_CF_ACCESS_TEAM_DOMAIN` (and
+`HUMANPORT_CF_ACCESS_AUD`) and restarting — the resolver reverts to `Resolvers.Env` on the next
+boot, with nothing else to undo.
 
 The `db` service's own credentials (`POSTGRES_USER`, `POSTGRES_PASSWORD`,
 `POSTGRES_DB`) are fixed in `compose.yaml` and match `DATABASE_URL`'s default —
