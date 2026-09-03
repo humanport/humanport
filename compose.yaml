@@ -12,8 +12,13 @@ services:
       POSTGRES_USER: humanport
       POSTGRES_PASSWORD: humanport
       POSTGRES_DB: humanport
+    # Published on the LOOPBACK ONLY. Bare `5432:5432` binds 0.0.0.0, which put a
+    # database carrying the default humanport:humanport credential on every interface
+    # of the host — on a machine without a firewall, that is the open internet. The port
+    # stays published rather than dropped because `mix test` and `mix ecto.*` on a
+    # developer machine connect to localhost:5432; nothing off-host needs it.
     ports:
-      - 5432:5432
+      - 127.0.0.1:5432:5432
     # PostgreSQL 18's Docker image switched its data-directory convention to
     # "pg_ctlcluster"-style major-version-specific subdirectories, so the volume now
     # mounts at /var/lib/postgresql (the image places data in a versioned subdirectory
@@ -49,8 +54,14 @@ services:
       PORT: 4000
       HUMANPORT_ACTOR_EMAIL: ${HUMANPORT_ACTOR_EMAIL:-owner@localhost}
       SECRET_KEY_BASE: ${SECRET_KEY_BASE:-}
+    # Published on the LOOPBACK ONLY, and this one is load-bearing rather than tidy.
+    # Until the Cloudflare Access gate lands, request_controller.ex's own moduledoc names
+    # the network boundary as the compensating control for an intentionally
+    # unauthenticated API (T-01-22) — a bare `4000:4000` binds 0.0.0.0 and removes exactly
+    # that control, so the code's promise and the shipped artifact disagreed. A tunnel
+    # connector reaches this from the host's own network namespace; nothing else should.
     ports:
-      - 4000:4000
+      - 127.0.0.1:4000:4000
     command: sh -c "/app/bin/migrate && /app/bin/server"
 
 # Indented 4 spaces rather than the services block's 2, deliberately: the OPS-01 acceptance
