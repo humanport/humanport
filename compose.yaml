@@ -60,6 +60,25 @@ services:
       PORT: 4000
       HUMANPORT_ACTOR_EMAIL: ${HUMANPORT_ACTOR_EMAIL:-owner@localhost}
       SECRET_KEY_BASE: ${SECRET_KEY_BASE:-}
+      # OPS-03. Blank here on purpose, and blank is what a bare `docker compose
+      # up` gets: config/runtime.exs treats a blank team domain as absent, so
+      # self-hosting keeps the Phase 1 environment resolver untouched. A
+      # deployment that supplies them through `--env-file` switches the
+      # Cloudflare Access verifier on instead.
+      #
+      # These three lines are load-bearing, not decorative. `--env-file`
+      # populates only Compose's own interpolation environment — its values
+      # "are never directly injected into containers" — so a variable absent
+      # from this block can never reach the application, no matter what
+      # /opt/humanport/.env says. Without them the verifier built in 02-01 and
+      # 02-02 cannot be switched on by any Compose deployment, and it fails
+      # SILENTLY OPEN: runtime.exs's `if` simply never fires, the environment
+      # resolver stays in place, and every actor keeps reading `[unverified]`
+      # with no error to notice. Found on 2026-09-03 by deploying and then
+      # measuring the container's environment instead of trusting the deploy.
+      HUMANPORT_CF_ACCESS_TEAM_DOMAIN: ${HUMANPORT_CF_ACCESS_TEAM_DOMAIN:-}
+      HUMANPORT_CF_ACCESS_AUD: ${HUMANPORT_CF_ACCESS_AUD:-}
+      HUMANPORT_CF_ACCESS_JWKS_REFRESH_SECONDS: ${HUMANPORT_CF_ACCESS_JWKS_REFRESH_SECONDS:-}
     # Published on the LOOPBACK ONLY, and this one is load-bearing rather than tidy.
     # Until the Cloudflare Access gate lands, request_controller.ex's own moduledoc names
     # the network boundary as the compensating control for an intentionally
