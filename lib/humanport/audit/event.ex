@@ -104,6 +104,21 @@ defmodule Humanport.Audit.Event do
     attribute :actor_label, :string, public?: true
     attribute :actor_verified, :boolean, default: false, allow_nil?: false, public?: true
 
+    # D-04 (02-02-PLAN.md Task 2) — the audit trail says an actor was
+    # verified AND how. `nil` for the local unverified path (D-11/D-12);
+    # populated by `Audit.record/2` from the resolved actor's `method`
+    # otherwise. This table is append-only (the triggers below) — the
+    # `one_of` vocabulary deliberately includes values nothing produces
+    # yet (`:magic_link`, `:oidc`, `:api_key`), mirroring the precedent
+    # `Humanport.Requests.HumanRequest`'s own `:type` enum already set
+    # (`[:ask, :choose, :approve, :escalate]` with only two implemented):
+    # adding a value later means an `ALTER TYPE`-equivalent migration
+    # against rows that can never be rewritten; adding it now costs
+    # nothing.
+    attribute :actor_method, :atom,
+      constraints: [one_of: [:sso, :service_token, :magic_link, :oidc, :api_key]],
+      public?: true
+
     attribute :resource_type, :string, allow_nil?: false, public?: true
     attribute :resource_id, :uuid, allow_nil?: false, public?: true
 

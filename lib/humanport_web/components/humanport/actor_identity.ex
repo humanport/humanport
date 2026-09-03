@@ -11,10 +11,27 @@ defmodule HumanPort.UI.ActorIdentity do
   the prop contract does not have to widen later; nothing in this phase
   passes them.
 
-  `method` (`:sso` / `:oidc` / `:api-key`) is shown only when `verified` is
-  true. Phase 1 never sets `verified: true`, so `method` is always `nil` in
-  the running product — the branch that renders it is exercised only by this
-  component's own render test.
+  `method` is shown only when `verified` is true.
+
+  02-02-PLAN.md Task 2 (D-04) — the `values:` list is widened to the SAME
+  vocabulary `Humanport.Audit.Event`'s `actor_method` column now carries
+  (`[:sso, :service_token, :magic_link, :oidc, :api_key]`), a superset of
+  Phase 1's original list. `:api_key` (underscore) is CANONICAL — it is
+  what the audit column and every producer from Phase 2 forward writes;
+  `:"api-key"` (hyphen) stays in the list only because it was already
+  accepted here and nothing has ever produced it, avoiding a silent
+  breaking change to this component's public prop contract for a value
+  no caller passes.
+
+  Note on what `values:` actually enforces: `Phoenix.Component`'s `attr
+  ... values:` check is a COMPILE-TIME warning for a LITERAL atom written
+  at a `<.actor_identity method={:some_atom} />` call site — it does
+  **not** raise at runtime, and does not validate a value that arrives
+  dynamically (`method={@event.actor_method}`, this component's actual
+  Phase 2 usage), confirmed by reading `Phoenix.Component.Declarative
+  .verify/3`, whose relevant clause only matches a literal HEEx AST
+  attribute value. An earlier draft of this moduledoc (matching this
+  plan's own action text) claimed a runtime raise; that was incorrect.
   """
 
   use Phoenix.Component
@@ -22,7 +39,11 @@ defmodule HumanPort.UI.ActorIdentity do
 
   attr :name, :string, required: true
   attr :prefix, :atom, default: :by, values: [:by, :escalated_to, :on_behalf_of]
-  attr :method, :atom, default: nil, values: [nil, :sso, :oidc, :"api-key"]
+
+  attr :method, :atom,
+    default: nil,
+    values: [nil, :sso, :oidc, :"api-key", :service_token, :magic_link, :api_key]
+
   attr :verified, :boolean, default: false
   attr :when, :any, default: nil
   attr :class, :any, default: nil

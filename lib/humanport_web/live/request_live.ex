@@ -214,19 +214,45 @@ defmodule HumanportWeb.RequestLive do
     end)
   end
 
-  defp event_sentence(%{event_type: "request.created", actor_label: actor}),
-    do: gettext("%{actor} created this request.", actor: actor || gettext("unknown"))
+  # D-04 (02-02-PLAN.md Task 2) — renders the acting actor through
+  # `<.actor_identity>` with its own `verified?`/`method`, instead of
+  # interpolating a bare `actor_label` string. This is what makes the
+  # credential axis visible in the timeline at all: a bare label cannot
+  # say whether it was verified or how, so a service-token-created request
+  # would otherwise show the SAME plain name in both the header
+  # (unverified run label) and the timeline (verified credential), with
+  # nothing distinguishing the two. `assigns = %{...}; ~H"""..."""` is a
+  # small function-component pattern — the sentence text is data
+  # (`event.event_type`-keyed) but the actor rendering itself needs
+  # `<.actor_identity>`'s own markup, which a plain `gettext/2` string
+  # cannot produce.
+  defp event_sentence(%{event_type: "request.created"} = event),
+    do: actor_identity_sentence(event, gettext("created this request."))
 
-  defp event_sentence(%{event_type: "request.responded", actor_label: actor}),
-    do: gettext("%{actor} answered it.", actor: actor || gettext("unknown"))
+  defp event_sentence(%{event_type: "request.responded"} = event),
+    do: actor_identity_sentence(event, gettext("answered it."))
 
-  defp event_sentence(%{event_type: "request.approved", actor_label: actor}),
-    do: gettext("%{actor} approved it.", actor: actor || gettext("unknown"))
+  defp event_sentence(%{event_type: "request.approved"} = event),
+    do: actor_identity_sentence(event, gettext("approved it."))
 
-  defp event_sentence(%{event_type: "request.rejected", actor_label: actor}),
-    do: gettext("%{actor} rejected it.", actor: actor || gettext("unknown"))
+  defp event_sentence(%{event_type: "request.rejected"} = event),
+    do: actor_identity_sentence(event, gettext("rejected it."))
 
   defp event_sentence(event), do: event.event_type
+
+  defp actor_identity_sentence(event, action_text) do
+    assigns = %{
+      name: event.actor_label || gettext("unknown"),
+      verified: event.actor_verified,
+      method: event.actor_method,
+      action_text: action_text
+    }
+
+    ~H"""
+    <.actor_identity name={@name} verified={@verified} method={@method} />
+    {@action_text}
+    """
+  end
 
   # ---- meta list (block 4) -------------------------------------------------
 
@@ -310,6 +336,15 @@ defmodule HumanportWeb.RequestLive do
           rows={context_rows(@request.context)}
           text={context_text(@request.context)}
         />
+
+        <p
+          :if={@events != []}
+          class="font-mono text-[length:var(--hp-text-meta)] text-text-faint"
+        >
+          {gettext(
+            "The name above is who asked; the name below is the credential that acted — not always the same thing."
+          )}
+        </p>
 
         <.request_timeline :if={@events != []} events={@events} />
 

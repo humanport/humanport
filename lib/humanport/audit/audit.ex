@@ -44,6 +44,7 @@ defmodule Humanport.Audit do
       actor_type: actor.type,
       actor_label: actor.label,
       actor_verified: actor.verified?,
+      actor_method: actor.method,
       resource_type: Map.fetch!(attrs, :resource_type),
       resource_id: Map.fetch!(attrs, :resource_id),
       previous_state: normalize_state(Map.get(attrs, :previous_state)),
