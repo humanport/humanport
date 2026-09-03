@@ -90,7 +90,14 @@ defmodule Humanport.MixProject do
       {:gettext, "~> 1.0"},
       {:jason, "~> 1.2"},
       {:dns_cluster, "~> 0.2.0"},
-      {:bandit, "~> 1.5"}
+      {:bandit, "~> 1.5"},
+      # OPS-03 — Cloudflare Access JWT verification (02-RESEARCH.md § Standard
+      # Stack). Pulls `tesla` in transitively as `joken_jwks`'s hard HTTP
+      # client dependency — see AGENTS.md "Phase 2 additions" for why that is
+      # an accepted exception to the project's `:req`-only rule rather than a
+      # violation of it.
+      {:joken, "~> 2.7"},
+      {:joken_jwks, "~> 1.8"}
     ]
   end
 

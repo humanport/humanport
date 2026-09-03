@@ -78,6 +78,17 @@ system, and `<.icon>` / `<.field>` come from Petal, not from `core_components.ex
   enforces this on every commit and push — never weaken the rule, never pass
   `--no-verify`, never disable the hooks.
 
+### Phase 2 additions
+
+- `joken_jwks` (OPS-03's Cloudflare Access JWT verification) pulls `tesla`
+  in as a hard, non-optional transitive HTTP client dependency. The
+  project's own `:req`-only rule above governs which HTTP client THIS
+  project's code calls directly — it does not and cannot govern what a
+  library uses internally. Do not swap `joken_jwks`'s adapter, do not
+  hand-roll a `Req`-based JWKS fetcher, and do not try to unlock `tesla`
+  out of `mix.lock`; `tesla` is accepted here as an unavoidable transitive
+  dependency, not a violation of the rule above.
+
 ### Two gaps `usage_rules.sync` cannot close
 
 - `petal_components` ships its usage rules as `rules.md`, not `usage-rules.md`, so the
