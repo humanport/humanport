@@ -101,7 +101,15 @@ defmodule Humanport.MixProject do
       # an accepted exception to the project's `:req`-only rule rather than a
       # violation of it.
       {:joken, "~> 2.7"},
-      {:joken_jwks, "~> 1.8"}
+      {:joken_jwks, "~> 1.8"},
+      # D-08a (02.1-CONTEXT.md) — the MCP surface is hand-written, so "follows
+      # the spec" has to be a passing test rather than a claim. This validates
+      # contract-test payloads against the vendored official schema
+      # (priv/mcp/schema-2026-07-28.json). Test-only: never enters a `mix
+      # release` artifact. Approved by the owner from its Hex registry page on
+      # 2026-09-03 (02.1-01-PLAN.md Task 1) — the named fallback (`xema` +
+      # `json_xema`) was NOT approved and must not be substituted silently.
+      {:ex_json_schema, "~> 0.11", only: :test}
     ]
   end
 

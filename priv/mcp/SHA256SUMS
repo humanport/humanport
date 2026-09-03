@@ -1,0 +1,11 @@
+# Pin for the vendored official MCP JSON Schema (D-08a, 02.1-CONTEXT.md).
+#
+# Upstream: https://raw.githubusercontent.com/modelcontextprotocol/modelcontextprotocol/main/schema/2026-07-28/schema.json
+# Upstream directory: schema/2026-07-28/
+# Fetched: 2026-09-03
+#
+# `shasum -a 256 -c SHA256SUMS`, run from this directory, must print "OK".
+# A spec revision that changes this file's bytes must show up here as a
+# failing check, never as silent drift. See README.md for what to do when
+# that happens.
+ef70b61f99b6d2e5e3b46863822eab08dff6a45bedc7a08914e0e5b133f40203  schema-2026-07-28.json
