@@ -56,12 +56,21 @@ defmodule HumanPort.UI.ActorIdentity do
     assigns = assign(assigns, :at, assigns[:when])
 
     ~H"""
+    <%!-- `flex-wrap` is load-bearing on a phone, which is the device this
+    component is actually judged on. Flex containers do not wrap by default,
+    so on a narrow viewport this row ran past the right edge and clipped its
+    own tail — and the tail is the `[unverified]` / `[verified·method]` chip,
+    the one thing on the screen that answers the trust question. A clipped
+    `[unverifie…` and a clipped `[verified·…` are indistinguishable, which
+    turns the component's whole purpose off exactly where it matters most.
+    `break-all` on the name covers the remaining case, a single address wider
+    than the viewport, which wrapping alone cannot help. --%>
     <span class={[
-      "inline-flex items-center gap-1.5 font-mono text-[length:var(--hp-text-token)]",
+      "inline-flex flex-wrap items-center gap-1.5 font-mono text-[length:var(--hp-text-token)]",
       @class
     ]}>
       <span class="text-text-secondary">{prefix_word(@prefix)}</span>
-      <span class="text-text-faint underline decoration-dotted">{@name}</span>
+      <span class="break-all text-text-faint underline decoration-dotted">{@name}</span>
       <span :if={not @verified} class="font-bold text-text-primary">[{gettext("unverified")}]</span>
       <span :if={@verified} class="text-text-secondary">
         [{gettext("verified")}<span :if={@method}>·{@method}</span>]
