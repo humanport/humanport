@@ -52,30 +52,58 @@ defmodule HumanportWeb.Plugs.ResolveActorTest do
   describe "on_mount/4 through a LiveView socket, with CloudflareAccess active" do
     setup :with_cloudflare_access_resolver
 
-    test "with no cookie, raises HumanportWeb.UnauthorizedError rather than redirecting" do
-      socket = bare_socket()
-
+    test "with no session snapshot, raises HumanportWeb.UnauthorizedError rather than redirecting" do
       assert_raise HumanportWeb.UnauthorizedError, fn ->
-        HumanportWeb.Plugs.ResolveActor.on_mount(:default, %{}, %{}, socket)
+        HumanportWeb.Plugs.ResolveActor.on_mount(:default, %{}, %{}, bare_socket())
       end
     end
 
-    test "with a genuine token via the CF_Authorization cookie, resolves and continues" do
-      token = Fixtures.signed_token()
-      socket = bare_socket(%{"CF_Authorization" => token})
+    test "with a verified-actor session snapshot, resolves and continues" do
+      snapshot = %{
+        "id" => nil,
+        "type" => "human",
+        "label" => "owner@example.com",
+        "verified" => true,
+        "method" => "sso"
+      }
+
+      session = %{"hp_resolved_actor" => snapshot}
 
       assert {:cont, updated_socket} =
-               HumanportWeb.Plugs.ResolveActor.on_mount(:default, %{}, %{}, socket)
+               HumanportWeb.Plugs.ResolveActor.on_mount(:default, %{}, session, bare_socket())
 
       assert updated_socket.assigns.actor.verified? == true
     end
   end
 
-  defp bare_socket(cookies \\ %{}) do
-    %Phoenix.LiveView.Socket{
-      private: %{live_temp: %{}, connect_info: %{cookies: cookies}}
-    }
+  describe "the session relay end to end (02-02-PLAN.md Task 1) — a REAL connected LiveView, not a synthetic socket" do
+    # Phoenix does not expose raw cookies (or `:session`) to
+    # `get_connect_info/2` at all (see `Resolvers.CloudflareAccess`'s
+    # moduledoc) — the synthetic `bare_socket/1` tests above prove
+    # `on_mount/4`'s own logic in isolation but cannot catch a break in the
+    # ACTUAL relay between `call/2`'s `put_session/3` and the `session`
+    # argument Phoenix threads into `on_mount/4` on a real dead render and
+    # reconnect, since that relay only exists on the real, compiled
+    # `HumanportWeb.Endpoint`/router/live_session wiring. `live/2` drives
+    # the request through that real endpoint, so this is the test that
+    # would have caught the `:cookies` mistake this task's own
+    # research/plan made.
+    setup :with_cloudflare_access_resolver
+
+    test "a genuine token on the dead render lets the connected reconnect resolve too", %{
+      conn: conn
+    } do
+      request = Humanport.Fixtures.request_fixture()
+      token = Fixtures.signed_token()
+
+      conn = put_req_header(conn, "cf-access-jwt-assertion", token)
+
+      assert {:ok, _view, html} = live(conn, ~p"/requests/#{request.id}")
+      assert html =~ request.title
+    end
   end
+
+  defp bare_socket, do: %Phoenix.LiveView.Socket{private: %{}}
 
   defp with_cloudflare_access_resolver(_context) do
     original_resolver = Application.fetch_env!(:humanport, :actor_resolver)

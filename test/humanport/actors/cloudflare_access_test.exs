@@ -29,6 +29,29 @@ defmodule Humanport.Actors.CloudflareAccessTest do
     Enum.reduce(cookies, conn, fn {k, v}, acc -> Plug.Test.put_req_cookie(acc, k, v) end)
   end
 
+  # `Resolvers.CloudflareAccess`'s socket clause reads
+  # `socket.private[:hp_session]` — the shape `ResolveActor.on_mount/4`
+  # stashes the LiveView session into before calling this resolver (see
+  # that module's moduledoc for why: Phoenix exposes neither raw cookies
+  # nor `:session` itself through `get_connect_info/2`). Mirrors
+  # `resolve_actor_test.exs`'s own `bare_socket/1` helper.
+  defp bare_socket(session \\ %{}) do
+    %Phoenix.LiveView.Socket{private: %{hp_session: session}}
+  end
+
+  defp actor_snapshot(attrs) do
+    Map.merge(
+      %{
+        "id" => nil,
+        "type" => "human",
+        "label" => "owner@example.com",
+        "verified" => true,
+        "method" => "sso"
+      },
+      attrs
+    )
+  end
+
   describe "the rejection direction (D-02)" do
     test "a request with no header and no cookie resolves to {:error, :missing_token}" do
       assert {:error, :missing_token} = CloudflareAccess.resolve(fake_conn())
@@ -72,6 +95,16 @@ defmodule Humanport.Actors.CloudflareAccessTest do
       assert {:error, :wrong_audience} =
                CloudflareAccess.resolve(fake_conn([{"cf-access-jwt-assertion", token}]))
     end
+
+    test "a genuine, correctly-scoped token carrying neither common_name nor email is refused" do
+      # A claims map matching neither clause must fall through to the
+      # catch-all rather than resolving to some default actor — a future
+      # Cloudflare payload shape is refused, not silently accepted.
+      token = Fixtures.signed_token(without: [:email])
+
+      assert {:error, :invalid_token} =
+               CloudflareAccess.resolve(fake_conn([{"cf-access-jwt-assertion", token}]))
+    end
   end
 
   describe "the acceptance direction" do
@@ -88,6 +121,58 @@ defmodule Humanport.Actors.CloudflareAccessTest do
 
       assert {:ok, %Actor{verified?: true}} =
                CloudflareAccess.resolve(fake_conn([], %{"CF_Authorization" => token}))
+    end
+  end
+
+  describe "the service-token direction (D-01)" do
+    test "a genuine, correctly-scoped, unexpired token carrying common_name (no email) resolves to a verified service actor" do
+      token =
+        Fixtures.signed_token(common_name: "agent-service-token-1.access", without: [:email])
+
+      assert {:ok,
+              %Actor{
+                type: :service,
+                verified?: true,
+                method: :service_token,
+                label: "agent-service-token-1.access"
+              }} = CloudflareAccess.resolve(fake_conn([{"cf-access-jwt-assertion", token}]))
+    end
+
+    test "a token carrying both common_name and email resolves to a service actor — common_name is checked first and the clauses do not interfere" do
+      token = Fixtures.signed_token(common_name: "agent-service-token-1.access")
+
+      assert {:ok, %Actor{type: :service, method: :service_token}} =
+               CloudflareAccess.resolve(fake_conn([{"cf-access-jwt-assertion", token}]))
+    end
+
+    test "a service-actor session snapshot resolves the same way through the LiveView socket" do
+      snapshot =
+        actor_snapshot(%{
+          "type" => "service",
+          "label" => "agent-service-token-1.access",
+          "method" => "service_token"
+        })
+
+      assert {:ok, %Actor{type: :service, verified?: true, method: :service_token}} =
+               CloudflareAccess.resolve(bare_socket(%{"hp_resolved_actor" => snapshot}))
+    end
+  end
+
+  describe "the LiveView socket clause (D-02, 02-02-PLAN.md Task 1) — session relay, not raw cookies" do
+    test "no session at all resolves to {:error, :missing_token}" do
+      assert {:error, :missing_token} = CloudflareAccess.resolve(bare_socket())
+    end
+
+    test "a session with no resolved-actor snapshot resolves to {:error, :missing_token}" do
+      assert {:error, :missing_token} = CloudflareAccess.resolve(bare_socket(%{"unrelated" => 1}))
+    end
+
+    test "a verified human snapshot resolves the same way a request header does" do
+      assert {:ok,
+              %Actor{type: :human, verified?: true, method: :sso, label: "owner@example.com"}} =
+               CloudflareAccess.resolve(
+                 bare_socket(%{"hp_resolved_actor" => actor_snapshot(%{})})
+               )
     end
   end
 
