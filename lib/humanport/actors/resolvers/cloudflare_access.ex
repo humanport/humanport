@@ -178,22 +178,53 @@ defmodule Humanport.Actors.Resolvers.CloudflareAccess do
   # credential.
   defp resolve_from_session(%{} = session) do
     case Map.get(session, @actor_session_key) do
-      %{"verified" => true} = snapshot -> {:ok, actor_from_snapshot(snapshot)}
+      %{"verified" => true} = snapshot -> actor_from_snapshot(snapshot)
       _ -> {:error, :missing_token}
     end
   end
 
   defp resolve_from_session(_session), do: {:error, :missing_token}
 
+  # D-02 says every rejection here returns `{:error, atom}`, so
+  # `ResolveActor.on_mount/4` can turn it into a clean 401. A bare
+  # `String.to_existing_atom/1` on session-derived strings broke that promise
+  # in the one direction nobody notices until it happens: it raises
+  # `ArgumentError`, which is a 500, not a 401. Every value a snapshot can
+  # carry today does correspond to an existing atom — but only because two
+  # independent lists (this resolver's own outputs and `Humanport.Audit.Event`'s
+  # `one_of` vocabularies) happen to stay in sync, not by construction. A
+  # session cookie outliving a deploy that drops a value, or any future
+  # divergence between the snapshot writer and the atom table, would turn a
+  # routine 401 into a 500 for every holder of that stale cookie. Matching the
+  # vocabulary explicitly makes the guarantee structural instead of incidental.
+  # Found by the Phase 2 code review (02-REVIEW.md WR-03).
+  @snapshot_types ~w(human agent service system)
+  @snapshot_methods ~w(sso service_token magic_link oidc api_key)
+
   defp actor_from_snapshot(snapshot) do
-    %Actor{
-      id: snapshot["id"],
-      type: String.to_existing_atom(snapshot["type"]),
-      label: snapshot["label"],
-      verified?: true,
-      method: snapshot["method"] && String.to_existing_atom(snapshot["method"])
-    }
+    with {:ok, type} <- known_atom(snapshot["type"], @snapshot_types),
+         {:ok, method} <- known_atom_or_nil(snapshot["method"], @snapshot_methods) do
+      {:ok,
+       %Actor{
+         id: snapshot["id"],
+         type: type,
+         label: snapshot["label"],
+         verified?: true,
+         method: method
+       }}
+    end
   end
+
+  defp known_atom(value, allowed) when is_binary(value) do
+    if value in allowed,
+      do: {:ok, String.to_existing_atom(value)},
+      else: {:error, :invalid_token}
+  end
+
+  defp known_atom(_value, _allowed), do: {:error, :invalid_token}
+
+  defp known_atom_or_nil(nil, _allowed), do: {:ok, nil}
+  defp known_atom_or_nil(value, allowed), do: known_atom(value, allowed)
 
   defp ensure_scoped_correctly(%{"iss" => _, "aud" => _}), do: :ok
   defp ensure_scoped_correctly(_claims), do: {:error, :invalid_token}

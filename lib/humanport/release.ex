@@ -91,6 +91,16 @@ defmodule Humanport.Release do
     else
       :ok
     end
+  rescue
+    # `get_signers/1` is `:ets.lookup/2`, which RAISES ArgumentError when the
+    # table does not exist rather than returning an empty result — and the
+    # table is created by the JWKS strategy's own start-up. So the one state
+    # this check exists to detect, "the key set is not there", has a variant
+    # that would crash `ready?/0` instead of answering it: an Access-configured
+    # instance whose strategy never started at all would turn a 503 with a
+    # reason into a 500 with a stack trace, on the endpoint an operator reads
+    # to find out what is wrong. Not-armed is not-armed either way.
+    ArgumentError -> {:error, :access_key_set_not_fetched}
   end
 
   @doc """

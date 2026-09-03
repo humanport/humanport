@@ -148,8 +148,21 @@ matters because migrations run at container start, before the server starts
 accepting traffic — see [Environment variables](#environment-variables) and
 `rel/overlays/bin/migrate`); it answers 503 with a machine-readable
 `reason` — `:migrations_pending` or `{:db_unreachable, ...}` — otherwise.
-Neither is reachable over the tunnel; both are host-local only, reached the
-same way the Compose healthcheck reaches them below.
+**Neither endpoint restricts who may call it, and this application does not
+make them host-local.** The `:health` router pipeline is `plug :accepts,
+["json"]` and nothing else — no origin check, no loopback guard, and
+deliberately no actor resolver, because these routes have to keep answering
+when identity resolution is itself what is broken. On the reference
+deployment they are unreachable from the internet only because Cloudflare
+Access sits in front of the whole hostname with no path carve-out, which is
+edge configuration living outside this repository. Scope Access to exclude
+`/health` or `/ready` — a tempting change, since they are genuinely useful
+to an external uptime monitor — or put a different reverse proxy in front of
+this origin, and `/ready`'s `reason` payload (which can carry a full
+`Postgrex.Error` message) becomes readable by anyone who can resolve the
+hostname. If you want the host-local guarantee to hold regardless of your
+edge, enforce it at your proxy or add a `conn.remote_ip` check; do not infer
+it from this application's behaviour.
 
 `compose.yaml`'s `app` service carries a `healthcheck:` that calls this same
 readiness check — plus a bare check that the application's own listener

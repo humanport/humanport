@@ -74,9 +74,20 @@ defmodule Humanport.ReleaseTest do
       # The measured failure, pinned. The key set is fetched asynchronously at
       # startup and took ~60s on the reference host; `/ready` answered 200
       # throughout while every service-token request was refused
-      # :no_signers_fetched. Nothing has started the JWKS strategy here, so the
-      # cache is empty — exactly the startup window.
-      previous = Application.get_env(:humanport, :actor_resolver)
+      # :no_signers_fetched.
+      #
+      # The empty cache is FORCED rather than assumed. The JWKS ETS cache is
+      # global process state that outlives a test, and this module's siblings
+      # (cloudflare_access_test.exs) populate it as a side effect of verifying
+      # real tokens — so simply asserting "empty" made this test pass or fail on
+      # ExUnit's seed, which is worse than not having it. Caught at seed 4.
+      strategy = Humanport.Actors.CloudflareAccessJwksStrategy
+      cache = JokenJwks.DefaultStrategyTemplate.EtsCache
+      previous_resolver = Application.get_env(:humanport, :actor_resolver)
+      previous_signers = try_get_signers(cache, strategy)
+
+      cache.new(strategy)
+      cache.put_signers(strategy, %{})
 
       Application.put_env(
         :humanport,
@@ -84,7 +95,14 @@ defmodule Humanport.ReleaseTest do
         Humanport.Actors.Resolvers.CloudflareAccess
       )
 
-      on_exit(fn -> Application.put_env(:humanport, :actor_resolver, previous) end)
+      on_exit(fn ->
+        Application.put_env(:humanport, :actor_resolver, previous_resolver)
+
+        case previous_signers do
+          [signers: signers] -> cache.put_signers(strategy, signers)
+          _ -> cache.put_signers(strategy, %{})
+        end
+      end)
 
       assert Humanport.Release.access_verifier_armed?() ==
                {:error, :access_key_set_not_fetched}
@@ -124,6 +142,15 @@ defmodule Humanport.ReleaseTest do
       # extension the "node" it stands in for, is still here to say so.
       assert Process.alive?(self())
     end
+  end
+
+  # `get_signers/1` is `:ets.lookup/2`, which raises when the table has never
+  # been created — the state this suite is in when nothing has started the JWKS
+  # strategy yet.
+  defp try_get_signers(cache, strategy) do
+    cache.get_signers(strategy)
+  rescue
+    ArgumentError -> []
   end
 
   # Temporarily overrides the configured Endpoint port for the duration of
