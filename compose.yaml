@@ -79,6 +79,18 @@ services:
       HUMANPORT_CF_ACCESS_TEAM_DOMAIN: ${HUMANPORT_CF_ACCESS_TEAM_DOMAIN:-}
       HUMANPORT_CF_ACCESS_AUD: ${HUMANPORT_CF_ACCESS_AUD:-}
       HUMANPORT_CF_ACCESS_JWKS_REFRESH_SECONDS: ${HUMANPORT_CF_ACCESS_JWKS_REFRESH_SECONDS:-}
+      # The same gap, found by the same audit: docs/SELF_HOSTING.md lists all
+      # four below as environment-tunable, and none of them could reach the
+      # container either. HUMANPORT_LONG_POLL_MAX_WAIT_SECONDS is the pointed
+      # one — config/runtime.exs keeps it in runtime config, in its own words,
+      # "specifically so Phase 2 can lower it from the environment without a
+      # code change", which was not possible on any Compose deployment.
+      # Nothing here failed loudly, because each has a default; the artifact
+      # just could not honour what the documentation promised.
+      HUMANPORT_DEFAULT_TENANT_ID: ${HUMANPORT_DEFAULT_TENANT_ID:-}
+      HUMANPORT_LONG_POLL_MAX_WAIT_SECONDS: ${HUMANPORT_LONG_POLL_MAX_WAIT_SECONDS:-}
+      POOL_SIZE: ${POOL_SIZE:-}
+      ECTO_IPV6: ${ECTO_IPV6:-}
     # Published on the LOOPBACK ONLY, and this one is load-bearing rather than tidy.
     # Until the Cloudflare Access gate lands, request_controller.ex's own moduledoc names
     # the network boundary as the compensating control for an intentionally

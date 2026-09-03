@@ -23,26 +23,30 @@ end
 config :humanport, HumanportWeb.Endpoint,
   http: [port: String.to_integer(System.get_env("PORT", "4000"))]
 
-# D-05 — environment override for the stable tenant default set in
-# config/config.exs. Still never accepted from the wire.
-if tenant_id = System.get_env("HUMANPORT_DEFAULT_TENANT_ID") do
-  config :humanport, default_tenant_id: tenant_id
-end
-
-# Blank means absent, for the Access variables below. `compose.yaml` passes
-# them with Compose's `${VAR:-}` interpolation, which is the only form that
-# reads a value out of `--env-file` — but it sets the variable to the EMPTY
-# STRING when nothing is configured, and `""` is truthy in Elixir. Without
-# this, a bare `docker compose up` would fire the override with a blank team
-# domain and then raise on the missing AUD tag: "no Access configured" would
-# become a boot crash, the exact opposite of what the fork below promises.
-# Compose's other form, a bare `KEY:`, leaves the variable genuinely unset but
-# resolves only from the deploying shell's own environment — `--env-file`
-# values "are never directly injected into containers" — so it cannot carry
-# the documented deploy command.
+# Blank means absent — the precondition for every variable `compose.yaml`
+# hands to the container. Compose delivers them with `${VAR:-}`
+# interpolation, which is the only form that reads a value out of
+# `--env-file` (the bare `KEY:` form resolves from the deploying shell's own
+# environment instead, and `--env-file` values "are never directly injected
+# into containers", so it cannot carry the documented deploy command). That
+# form renders an unconfigured variable as the EMPTY STRING, and `""` is
+# truthy in Elixir — so every reader below must be told that blank and
+# absent are the same thing, or shipping a variable in `compose.yaml` turns
+# a default into a boot crash (`String.to_integer("")`) or, worse, into a
+# silently empty setting.
+#
+# This is the general rule the 2026-09-03 Access finding produced, not a
+# special case: a variable may not be added to `compose.yaml` until its
+# reader here is blank-safe.
 blank_to_nil = fn
   nil -> nil
   value -> if String.trim(value) == "", do: nil, else: value
+end
+
+# D-05 — environment override for the stable tenant default set in
+# config/config.exs. Still never accepted from the wire.
+if tenant_id = blank_to_nil.(System.get_env("HUMANPORT_DEFAULT_TENANT_ID")) do
+  config :humanport, default_tenant_id: tenant_id
 end
 
 # OPS-03 (02-RESEARCH.md Pitfall 5) — the actor-resolver fork. Deliberately
@@ -105,7 +109,9 @@ end
 # can lower it from the environment without a code change.
 config :humanport,
   long_poll_max_wait_seconds:
-    String.to_integer(System.get_env("HUMANPORT_LONG_POLL_MAX_WAIT_SECONDS", "50"))
+    String.to_integer(
+      blank_to_nil.(System.get_env("HUMANPORT_LONG_POLL_MAX_WAIT_SECONDS")) || "50"
+    )
 
 if config_env() == :dev do
   # Reload browser tabs when matching files change.
@@ -137,7 +143,7 @@ if config_env() == :prod do
   config :humanport, Humanport.Repo,
     # ssl: true,
     url: database_url,
-    pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10"),
+    pool_size: String.to_integer(blank_to_nil.(System.get_env("POOL_SIZE")) || "10"),
     # For machines with several cores, consider starting multiple pools of `pool_size`
     # pool_count: 4,
     socket_options: maybe_ipv6
