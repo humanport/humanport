@@ -13,6 +13,17 @@ defmodule HumanportWeb.HealthControllerTest do
   assertion alone — and the same handler is proved capable of catching a
   query at all by asserting it FIRES for `/ready`, which does read the
   database.
+
+  **The handler filters on the firing process, not just the event name.**
+  `:telemetry.attach/4` is process-GLOBAL — under `async: true`, every other
+  concurrently-running test's own database query fires the same
+  `[:humanport, :repo, :query]` event, and an unfiltered handler would catch
+  those too and fail this test on pure bad luck, not on `/health` actually
+  touching the database. `Phoenix.ConnTest`'s `get/2` runs the request
+  synchronously IN THIS TEST'S OWN PROCESS (no process is spawned for the
+  request), so any query genuinely caused by `/health` fires with `self()`
+  equal to this test's own pid; guarding on that equality is what makes the
+  assertion about THIS request rather than about the whole async test suite.
   """
 
   use HumanportWeb.ConnCase, async: true
@@ -25,7 +36,9 @@ defmodule HumanportWeb.HealthControllerTest do
       :telemetry.attach(
         handler_id,
         [:humanport, :repo, :query],
-        fn _event, _measurements, _metadata, _config -> send(test_pid, :db_query_fired) end,
+        fn _event, _measurements, _metadata, _config ->
+          if self() == test_pid, do: send(test_pid, :db_query_fired)
+        end,
         nil
       )
 
@@ -54,7 +67,9 @@ defmodule HumanportWeb.HealthControllerTest do
       :telemetry.attach(
         handler_id,
         [:humanport, :repo, :query],
-        fn _event, _measurements, _metadata, _config -> send(test_pid, :db_query_fired) end,
+        fn _event, _measurements, _metadata, _config ->
+          if self() == test_pid, do: send(test_pid, :db_query_fired)
+        end,
         nil
       )
 

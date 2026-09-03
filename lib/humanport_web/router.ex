@@ -21,6 +21,20 @@ defmodule HumanportWeb.Router do
     plug HumanportWeb.Plugs.ResolveActor
   end
 
+  # OPS-06, D-06/D-07 — deliberately NOT ResolveActor. `/health` and `/ready`
+  # must keep answering even when the actor resolver itself is what is
+  # broken; see HealthController's own moduledoc for the full reasoning.
+  pipeline :health do
+    plug :accepts, ["json"]
+  end
+
+  scope "/", HumanportWeb do
+    pipe_through :health
+
+    get "/health", HealthController, :health
+    get "/ready", HealthController, :ready
+  end
+
   scope "/", HumanportWeb do
     pipe_through :browser
 
