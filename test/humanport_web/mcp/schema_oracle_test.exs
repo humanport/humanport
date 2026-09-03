@@ -10,7 +10,7 @@ defmodule HumanportWeb.Mcp.SchemaOracleTest do
 
   use ExUnit.Case, async: true
 
-  alias Humanport.McpSchema
+  alias Humanport.{McpFixtures, McpSchema}
   alias Humanport.McpSchema.{DigestMismatchError, UnexpectedlyValidError, UnknownDefinitionError}
 
   describe "assert_valid!/2 — well-formed payloads" do
@@ -111,6 +111,55 @@ defmodule HumanportWeb.Mcp.SchemaOracleTest do
       assert_raise UnexpectedlyValidError, fn ->
         McpSchema.refute_valid!(well_formed, "DiscoverResult")
       end
+    end
+  end
+
+  describe "Humanport.McpFixtures — fixture bodies validate against the vendored schema (02.1-01 Task 3 Part C)" do
+    test "discover_request/1 validates against DiscoverRequest" do
+      assert :ok =
+               McpFixtures.discover_request("discover-1")
+               |> McpSchema.assert_valid!("DiscoverRequest")
+    end
+
+    test "list_tools_request/1 validates against ListToolsRequest" do
+      assert :ok =
+               McpFixtures.list_tools_request(1)
+               |> McpSchema.assert_valid!("ListToolsRequest")
+    end
+
+    test "call_tool_request/3 validates against CallToolRequest" do
+      assert :ok =
+               McpFixtures.call_tool_request(2, "ask", %{"question" => "proceed?"})
+               |> McpSchema.assert_valid!("CallToolRequest")
+    end
+  end
+
+  describe "Humanport.McpFixtures — required _meta keys and derived headers" do
+    test "every fixture body carries both required _meta keys" do
+      for body <- [
+            McpFixtures.discover_request("d-1"),
+            McpFixtures.list_tools_request("l-1"),
+            McpFixtures.call_tool_request("c-1", "ask", %{})
+          ] do
+        meta = body["params"]["_meta"]
+        assert Map.has_key?(meta, "io.modelcontextprotocol/protocolVersion")
+        assert Map.has_key?(meta, "io.modelcontextprotocol/clientCapabilities")
+      end
+    end
+
+    test "headers_for/1 mirrors the body's protocol version and method, and the tool name for tools/call only" do
+      discover = McpFixtures.discover_request("d-2")
+      discover_headers = McpFixtures.headers_for(discover)
+
+      assert {"mcp-protocol-version", McpFixtures.protocol_version()} in discover_headers
+      assert {"mcp-method", "server/discover"} in discover_headers
+      refute Enum.any?(discover_headers, fn {k, _v} -> k == "mcp-name" end)
+
+      call = McpFixtures.call_tool_request("c-2", "approve", %{"id" => "abc"})
+      call_headers = McpFixtures.headers_for(call)
+
+      assert {"mcp-method", "tools/call"} in call_headers
+      assert {"mcp-name", "approve"} in call_headers
     end
   end
 

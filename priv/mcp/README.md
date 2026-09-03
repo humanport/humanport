@@ -68,7 +68,9 @@ substitution again; do not assume it still holds.
 
 ## Advertised protocol revisions
 
-TBD — filled in by `02.1-01-PLAN.md` Task 3 once the client-revision finding
-(`.planning/phases/02.1-humanport-in-the-loop/02.1-CLIENT-REVISION.md`) is
-recorded and the owner has decided how many revisions `server/discover`
-advertises.
+`server/discover` advertises `2026-07-28` only. Owner's decision, 2026-09-04,
+from the captured client-revision evidence
+(`.planning/phases/02.1-humanport-in-the-loop/02.1-CLIENT-REVISION.md` in the
+planning repository): the observed Claude Code CLI negotiates `2026-07-28`
+exactly, with no attempt at an older revision, so no second advertised
+revision, no `initialize` path and no `Mcp-Session-Id` handling are added.
