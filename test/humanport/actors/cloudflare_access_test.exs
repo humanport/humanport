@@ -11,9 +11,16 @@ defmodule Humanport.Actors.CloudflareAccessTest do
   half of this file — an implementation that accepts valid tokens and
   quietly falls through on invalid ones passes a happy-path suite and ships
   an open door (D-02).
+
+  `async: false` (changed from `async: true` in 02-02-PLAN.md Task 3): the
+  forced-refresh timer tests below stop and restart the app-supervised
+  `CloudflareAccessJwksStrategy` singleton and mutate
+  `:cf_access_jwks_refresh_ms` process-global config for their duration —
+  not safe to interleave with a sibling test in the SAME file scheduled
+  concurrently.
   """
 
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias Humanport.Actors.Actor
   alias Humanport.Actors.CloudflareAccessToken
@@ -190,6 +197,100 @@ defmodule Humanport.Actors.CloudflareAccessTest do
 
       assert {:ok, %{"email" => "owner@example.com"}} =
                CloudflareAccessToken.verify_and_validate(token)
+    end
+  end
+
+  describe "the JWKS forced-refresh window (D-03, 02-02-PLAN.md Task 3)" do
+    alias Humanport.Actors.CloudflareAccessJwksStrategy, as: Strategy
+
+    test "the interval is read from configuration and defaults to five minutes" do
+      original = Application.get_env(:humanport, :cf_access_jwks_refresh_ms)
+
+      on_exit(fn ->
+        if original do
+          Application.put_env(:humanport, :cf_access_jwks_refresh_ms, original)
+        else
+          Application.delete_env(:humanport, :cf_access_jwks_refresh_ms)
+        end
+      end)
+
+      Application.delete_env(:humanport, :cf_access_jwks_refresh_ms)
+      assert Strategy.refresh_interval_ms() == 300_000
+
+      Application.put_env(:humanport, :cf_access_jwks_refresh_ms, 42)
+      assert Strategy.refresh_interval_ms() == 42
+    end
+
+    @tag :capture_log
+    test "the forced-refresh telemetry event fires more than once, unconditionally, with a fast interval and no token presented" do
+      original_interval = Application.get_env(:humanport, :cf_access_jwks_refresh_ms)
+      Application.put_env(:humanport, :cf_access_jwks_refresh_ms, 20)
+
+      test_pid = self()
+      handler_id = {:jwks_force_refresh_test, make_ref()}
+
+      :telemetry.attach(
+        handler_id,
+        [:humanport, :cloudflare_access_jwks, :force_refresh],
+        fn _event, _measurements, _metadata, _config -> send(test_pid, :force_refresh_fired) end,
+        nil
+      )
+
+      on_exit(fn ->
+        :telemetry.detach(handler_id)
+
+        if original_interval do
+          Application.put_env(:humanport, :cf_access_jwks_refresh_ms, original_interval)
+        else
+          Application.delete_env(:humanport, :cf_access_jwks_refresh_ms)
+        end
+
+        # Restore the app-supervised strategy to its normal (five-minute,
+        # unless overridden) interval so no other test observes a
+        # 20ms-armed timer left running after this one.
+        Supervisor.terminate_child(Humanport.Supervisor, Strategy)
+        Supervisor.restart_child(Humanport.Supervisor, Strategy)
+      end)
+
+      # `config/test.exs` sets `cf_access_team_domain`, so
+      # `Humanport.Application` already supervises this module — restart it
+      # so `init_opts/1` re-reads the fast interval just configured above.
+      :ok = Supervisor.terminate_child(Humanport.Supervisor, Strategy)
+      {:ok, _pid} = Supervisor.restart_child(Humanport.Supervisor, Strategy)
+
+      # A one-shot timer that never re-arms would pass a single
+      # `assert_receive` — asserting it TWICE is what proves
+      # `handle_info(:force_refresh, state)` reschedules itself rather than
+      # firing once and going quiet for the rest of the (real) five minutes.
+      assert_receive :force_refresh_fired, 1_000
+      assert_receive :force_refresh_fired, 1_000
+    end
+
+    @tag :capture_log
+    test "a failed fetch leaves the previously cached keys in place — D-03's other half" do
+      alias JokenJwks.DefaultStrategyTemplate.EtsCache
+
+      # The ETS table already exists (the app-supervised strategy created
+      # it at boot) and is `:public` — writable/readable directly, no need
+      # to go through the live GenServer at all for this assertion.
+      EtsCache.put_signers(Strategy, %{"seeded-kid" => :seeded_signer})
+
+      # Port 1 refuses the connection immediately (no DNS lookup, no
+      # timeout wait) — this is `fetch_signers/3`'s own public,
+      # library-documented entry point, called exactly as
+      # `handle_info(:force_refresh, state)` calls it.
+      assert {:error, _reason} =
+               JokenJwks.DefaultStrategyTemplate.fetch_signers(
+                 Strategy,
+                 "http://127.0.0.1:1/unreachable",
+                 %{
+                   jws_supported_algs: ["RS256"],
+                   http_max_retries_per_fetch: 1,
+                   http_delay_per_retry: 1
+                 }
+               )
+
+      assert EtsCache.get_signers(Strategy) == [{:signers, %{"seeded-kid" => :seeded_signer}}]
     end
   end
 end
