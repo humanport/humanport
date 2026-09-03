@@ -92,12 +92,24 @@ defmodule Humanport.Actors.CloudflareAccessTest do
                CloudflareAccess.resolve(fake_conn([{"cf-access-jwt-assertion", token}]))
     end
 
-    test "a token whose aud is a bare string rather than a list is refused (D-05 shape)" do
-      # Joken's `default_claims` renders `aud` as JSON straight from the
-      # claims map — passing a bare string here mimics a token that is not
-      # shaped the way Cloudflare's own JWTs are shaped, which must be
-      # refused rather than coerced.
-      token = Fixtures.signed_token(aud: "test-aud-tag")
+    test "a bare-string aud naming a SIBLING application is still refused (D-05)" do
+      # This test replaces one that asserted a bare-string `aud` is refused
+      # per se, on the reasoning that it "is not shaped the way Cloudflare's
+      # own JWTs are shaped". Measured against the live deployment on
+      # 2026-09-03, that premise is wrong for exactly one case: a genuine,
+      # correctly-SIGNED service-token JWT carries `aud` as a bare string.
+      # Refusing the shape refused the whole agent path (D-01). What D-05
+      # actually protects — a token minted for a sibling application in the
+      # shared Cloudflare account must not be accepted here — is what this
+      # asserts instead, and it is unaffected by the shape.
+      token = Fixtures.signed_token(aud: "a-sibling-applications-aud-tag")
+
+      assert {:error, :wrong_audience} =
+               CloudflareAccess.resolve(fake_conn([{"cf-access-jwt-assertion", token}]))
+    end
+
+    test "an aud that is neither a list nor a string is refused, not coerced" do
+      token = Fixtures.signed_token(aud: 12_345)
 
       assert {:error, :wrong_audience} =
                CloudflareAccess.resolve(fake_conn([{"cf-access-jwt-assertion", token}]))
@@ -149,6 +161,25 @@ defmodule Humanport.Actors.CloudflareAccessTest do
       token = Fixtures.signed_token(common_name: "agent-service-token-1.access")
 
       assert {:ok, %Actor{type: :service, method: :service_token}} =
+               CloudflareAccess.resolve(fake_conn([{"cf-access-jwt-assertion", token}]))
+    end
+
+    test "the real shape: a service token whose aud is a BARE STRING resolves, because that is how Cloudflare mints it" do
+      # The regression this pins. Cloudflare sends `aud` as an array on a
+      # user session's JWT and as a bare string on a service token's. The
+      # validator accepted only the array, so every service-token request
+      # against the live deployment was refused with :wrong_audience while
+      # the owner's browser resolved fine — measured 2026-09-03, and the
+      # asymmetry is what gave the cause away. Both shapes are compared by
+      # full equality against the configured tag, so this is no weaker.
+      token =
+        Fixtures.signed_token(
+          aud: Fixtures.aud_tag(),
+          common_name: "agent-service-token-1.access",
+          without: [:email]
+        )
+
+      assert {:ok, %Actor{type: :service, verified?: true, method: :service_token}} =
                CloudflareAccess.resolve(fake_conn([{"cf-access-jwt-assertion", token}]))
     end
 
