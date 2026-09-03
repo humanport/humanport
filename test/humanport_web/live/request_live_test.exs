@@ -90,6 +90,32 @@ defmodule HumanportWeb.Live.RequestLiveTest do
       {:ok, _view, html} = live(conn, ~p"/requests/#{request.id}")
       assert html =~ "created this request"
     end
+
+    test "the timeline renders the acting actor's verified state through actor_identity, not a bare label",
+         %{conn: conn} do
+      request =
+        request_fixture(%{
+          title: "Created by a service token",
+          requester_label: "claude-code/gsd",
+          actor: %Humanport.Actors.Actor{
+            type: :service,
+            label: "agent-service-token-1.access",
+            verified?: true,
+            method: :service_token
+          }
+        })
+
+      {:ok, _view, html} = live(conn, ~p"/requests/#{request.id}")
+
+      # The header names the RUN (client-supplied, always unverified per
+      # D-12) — the timeline names the CREDENTIAL that actually authenticated
+      # the call. Same request, two distinguishable identities, per the
+      # assumption-delta decision this plan carries.
+      assert html =~ "claude-code/gsd"
+      assert html =~ "agent-service-token-1.access"
+      assert html =~ "verified"
+      assert html =~ "service_token"
+    end
   end
 
   describe "the approval asymmetry — approve request" do

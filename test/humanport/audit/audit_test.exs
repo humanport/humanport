@@ -35,7 +35,8 @@ defmodule Humanport.Requests.AuditTest do
           event_type: e.event_type,
           previous_state: e.previous_state,
           new_state: e.new_state,
-          actor_verified: e.actor_verified
+          actor_verified: e.actor_verified,
+          actor_method: e.actor_method
         },
         order_by: e.occurred_at
       )
@@ -86,6 +87,32 @@ defmodule Humanport.Requests.AuditTest do
                  actor_verified: false
                }
              ] = audit_rows(rejected.id)
+    end
+  end
+
+  describe "D-04 — the audit trail records HOW an actor was verified, not only whether (actor_method)" do
+    test "an actor with a method stores that method on the row" do
+      request =
+        request_fixture(%{
+          type: :ask,
+          title: "Ask via a service token",
+          actor: %Humanport.Actors.Actor{
+            type: :service,
+            label: "agent-service-token-1.access",
+            verified?: true,
+            method: :service_token
+          }
+        })
+
+      assert [%{event_type: "request.created", actor_method: "service_token"}] =
+               audit_rows(request.id)
+    end
+
+    test "the local unverified actor (no method) still stores nil — D-11/D-12 stay distinguishable" do
+      request = request_fixture(%{type: :ask, title: "Local unverified"})
+
+      assert [%{event_type: "request.created", actor_method: nil, actor_verified: false}] =
+               audit_rows(request.id)
     end
   end
 

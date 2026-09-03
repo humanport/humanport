@@ -228,6 +228,18 @@ defmodule HumanportWeb.HumanPortUITest do
 
       assert verified =~ "sso"
     end
+
+    test "renders :service_token without raising (D-04, 02-02-PLAN.md Task 2)" do
+      html =
+        render_component(&ActorIdentity.actor_identity/1, %{
+          name: "agent-service-token-1.access",
+          verified: true,
+          method: :service_token
+        })
+
+      assert html =~ "service_token"
+      assert html =~ "[verified"
+    end
   end
 
   describe "MetaList" do
