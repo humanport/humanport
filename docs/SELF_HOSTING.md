@@ -138,6 +138,42 @@ The `db` service's own credentials (`POSTGRES_USER`, `POSTGRES_PASSWORD`,
 `POSTGRES_DB`) are fixed in `compose.yaml` and match `DATABASE_URL`'s default —
 change them together if you change either.
 
+## Health, readiness, and what a sustained "unhealthy" actually causes
+
+`GET /health` answers as soon as the BEAM is up and the router is dispatching
+requests — it makes no database call, so it still answers when the database
+is what is wrong. `GET /ready` answers 200 only once the database is
+reachable **and** every known migration has actually been applied (this
+matters because migrations run at container start, before the server starts
+accepting traffic — see [Environment variables](#environment-variables) and
+`rel/overlays/bin/migrate`); it answers 503 with a machine-readable
+`reason` — `:migrations_pending` or `{:db_unreachable, ...}` — otherwise.
+Neither is reachable over the tunnel; both are host-local only, reached the
+same way the Compose healthcheck reaches them below.
+
+`compose.yaml`'s `app` service carries a `healthcheck:` that calls this same
+readiness check — plus a bare check that the application's own listener
+still accepts a TCP connection — through the release's `rpc` command rather
+than an HTTP request, because the runner image ships neither `curl` nor
+`wget`. After roughly a minute of sustained failure (`interval: 10s`,
+`retries: 6`), Compose marks the `app` service `unhealthy`.
+
+**Be precise about what that causes, because it is easy to assume more than
+it does.** Standalone Docker and Compose do **not** restart a container for
+becoming unhealthy — a restart policy (`restart: unless-stopped`, set on both
+services in this file) fires on container **exit**: a crash, a process that
+returns, a rebooted host. Restart-on-unhealthy is a Swarm/Kubernetes-style
+orchestrator behaviour that plain `docker compose up` does not provide. A
+sustained "no" from this healthcheck does **not** restart the container by
+itself. What it actually gives you: the state is visible in
+`docker compose ps` and `docker inspect` without any extra tooling, and
+anything with `depends_on: condition: service_healthy` pointed at `app`
+would wait on it. If you want an unhealthy container to actually restart
+itself, that is a decision to make deliberately (an autoheal sidecar, an
+external supervisor, or your own monitoring reacting to the visible state) —
+this version does not make that decision for you, and does not ship a third
+service to do it.
+
 ## What happens to a request nobody ever answers
 
 It stays pending indefinitely and keeps appearing in the inbox's open tab.

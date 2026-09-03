@@ -139,6 +139,19 @@ defmodule Humanport.Release do
     e -> {:error, {:db_unreachable, Exception.message(e)}}
   end
 
+  # Rule 1 fix (found during this task's own human-check, docker compose
+  # stopped underneath a live probe): `db_reachable?/0`'s cheap `SELECT 1`
+  # can succeed on an already-checked-out pool connection a moment before
+  # the database genuinely goes away, leaving `Ecto.Migrator.migrations/3`
+  # below to hit the actual failure — observed live as an unhandled
+  # `DBConnection.ConnectionError` propagating out of this function. Without
+  # this `rescue`, that reaches `ready?/0` uncaught: `/ready` would crash
+  # with a 500 instead of composing the 503 D-06 promises, and
+  # `healthcheck!/0`'s "raise a clean 'not ready' message" contract would be
+  # broken by an exception it never got to compose. `:migration_check_failed`
+  # is a distinct reason from `db_reachable?/0`'s own `:db_unreachable` on
+  # purpose — same underlying cause in practice (the database disappearing
+  # mid-probe), but naming where the check actually failed.
   defp migrations_up? do
     path = Ecto.Migrator.migrations_path(Humanport.Repo)
 
@@ -149,6 +162,8 @@ defmodule Humanport.Release do
       true -> :ok
       false -> {:error, :migrations_pending}
     end
+  rescue
+    e -> {:error, {:migration_check_failed, Exception.message(e)}}
   end
 
   defp listener_reachable? do

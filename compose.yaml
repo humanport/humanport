@@ -32,6 +32,12 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
+    # OPS-02's goal is an instance that runs CONTINUOUSLY. This fires on
+    # container exit (a crash, a rebooted host) — the thing that is
+    # genuinely part of "runs continuously," unlike the healthcheck above,
+    # which only reports state (see the app service's own healthcheck
+    # comment for what that distinction means in practice).
+    restart: unless-stopped
 
   # The application. Depends on the database's healthcheck, not a wait-for-it script —
   # the healthcheck above already exists, and a retry loop here would hide a real
@@ -63,6 +69,51 @@ services:
     ports:
       - 127.0.0.1:4000:4000
     command: sh -c "/app/bin/migrate && /app/bin/server"
+    # OPS-06, D-07. Goes in through the release's own `rpc` command, not an
+    # HTTP request: the runner image's final stage installs exactly
+    # `libstdc++6 openssl libncurses6 locales ca-certificates` (Dockerfile) —
+    # no curl, no wget — so the most common Docker healthcheck idiom (fetch
+    # a URL) cannot run inside this container at all.
+    # `Humanport.Release.healthcheck!()` composes D-06's readiness check
+    # (database reachable AND every migration applied) with a bare TCP
+    # connect to this same process's own configured port, proving the
+    # listener itself still accepts a connection — something `rpc` reaching
+    # in over Erlang distribution otherwise proves nothing about. It raises
+    # rather than halting: `rpc` runs the expression on the ALREADY-RUNNING
+    # node, and System.halt/1 there would stop the real server, not a
+    # throwaway process (see Humanport.Release.healthcheck!/0's own
+    # moduledoc for the full reasoning).
+    #
+    # A correction, stated plainly because D-07 itself states the opposite:
+    # standalone Docker/Compose does NOT restart a container for becoming
+    # unhealthy — a restart policy fires on container EXIT, and
+    # restart-on-unhealthy is a Swarm/orchestrator behaviour that neither
+    # plain `docker compose up` nor this file provides. What this
+    # healthcheck actually delivers: the state becomes visible in
+    # `docker compose ps`/`docker inspect` without extra tooling, and any
+    # future `depends_on: condition: service_healthy` can gate on it. An
+    # autoheal sidecar would close that gap — deliberately not added here;
+    # this file's own header says the application and PostgreSQL and
+    # nothing else, and a third service is the owner's decision to make, not
+    # a side effect of adding a healthcheck. See docs/SELF_HOSTING.md for
+    # the same correction, spelled out for an operator reading it fresh.
+    healthcheck:
+      test: ["CMD-SHELL", "/app/bin/humanport rpc \"Humanport.Release.healthcheck!()\""]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      # 60s rather than the more common 30s: migrations run before the
+      # server on this deployment (rel/overlays/bin/migrate, then
+      # rel/overlays/bin/server) and the reference host is a four-core
+      # ARM64 machine. Failures during start_period do not count against
+      # retries, so the only cost of the larger number is a slightly later
+      # first verdict; the cost of too small a number is a container
+      # declared unhealthy for doing exactly what it is supposed to do at
+      # boot.
+      start_period: 60s
+    # See the `db` service's own restart comment above — this is the thing
+    # that actually fires on exit, not the healthcheck.
+    restart: unless-stopped
 
 # Indented 4 spaces rather than the services block's 2, deliberately: the OPS-01 acceptance
 # check counts services by grepping 2-space-indented top-level keys, and a 2-space `pgdata:`

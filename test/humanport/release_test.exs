@@ -13,6 +13,20 @@ defmodule Humanport.ReleaseTest do
   HumanportWeb.Endpoint)` to point the listener-reachability check at a
   throwaway socket, which would race any concurrently-running async test
   that reads the same config.
+
+  Not automated here, by the same scoping `02-VALIDATION.md`'s own Per-Task
+  table applies (no row exists for a "database genuinely unreachable" 503):
+  `migrations_up?/0`'s `rescue` (Rule 1 fix, found running this task's own
+  Task 2 `<human-check>` — `db_reachable?/0`'s cheap `SELECT 1` can succeed
+  on an already-checked-out connection a moment before the database
+  genuinely disappears, leaving the heavier `Ecto.Migrator.migrations/3`
+  call to hit the real, unhandled failure). Reproducing a connection that
+  dies BETWEEN two checks against the shared sandboxed test database, on
+  demand, is not something this file attempts — it was proven live instead:
+  `docker compose exec app /app/bin/humanport rpc
+  "Humanport.Release.healthcheck!()"` against a real deployment with `db`
+  stopped now exits non-zero (composed, not a raw crash) with the `app`
+  container still running afterward.
   """
 
   use Humanport.DataCase, async: false
