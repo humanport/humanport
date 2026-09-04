@@ -69,7 +69,18 @@ config :humanport,
   # browser-originated request); HUMANPORT_MCP_ALLOWED_ORIGINS overrides it
   # at runtime (config/runtime.exs).
   mcp_supported_versions: ["2026-07-28"],
-  mcp_allowed_origins: []
+  mcp_allowed_origins: [],
+  # 02.1-03-PLAN.md Task 1 Part D — the MCP `await` tool's own ceiling,
+  # expressed in milliseconds so `HumanportWeb.MCP.Timeouts.await_timeout_ms/0`
+  # never has to multiply at read time. Equal to the long-poll ceiling's own
+  # default (50s, config/runtime.exs) — the two are independently
+  # configurable (HUMANPORT_MCP_AWAIT_TIMEOUT_SECONDS below vs
+  # HUMANPORT_LONG_POLL_MAX_WAIT_SECONDS), but ship with the same default so
+  # `await` behaves like the HTTP `?wait=` surface out of the box.
+  mcp_await_timeout_ms: 50_000,
+  # The SSE keep-alive comment-line cadence `await.ex` writes at — well
+  # under any named intermediary idle bound and far under the ceiling above.
+  mcp_keep_alive_interval_ms: 15_000
 
 # Configure the endpoint
 config :humanport, HumanportWeb.Endpoint,
@@ -80,7 +91,22 @@ config :humanport, HumanportWeb.Endpoint,
     layout: false
   ],
   pubsub_server: Humanport.PubSub,
-  live_view: [signing_salt: "emDSLLzX"]
+  live_view: [signing_salt: "emDSLLzX"],
+  # D-01a / T-02.1-15 (02.1-03-PLAN.md Task 1) — set EXPLICITLY, comfortably
+  # above the MCP await ceiling above (50_000ms), so a future
+  # Bandit/ThousandIsland default change can never silently shorten every
+  # wait. FINDING, recorded in full in HumanportWeb.MCP.Timeouts' own
+  # moduledoc and in priv/mcp/TRANSPORT.md: `read_timeout` is a
+  # `thousand_island_options` key (NOT `http_1_options`, despite this
+  # project's own earlier runtime.exs comment naming it that way), and per
+  # deps/thousand_island's own Handler moduledoc it bounds the IDLE time
+  # BETWEEN handler callbacks waiting for MORE client-sent data — not how
+  # long a single Plug invocation may hold a response open once the request
+  # has been fully read. It therefore does not, in practice, bound
+  # `await`'s SSE write loop at all; set here anyway as a defensive
+  # explicit value, and asserted (not merely hoped) by
+  # `HumanportWeb.MCP.Timeouts.verify!/0` at boot.
+  http: [thousand_island_options: [read_timeout: 90_000]]
 
 # Configure LiveView
 config :phoenix_live_view,

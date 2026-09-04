@@ -123,6 +123,18 @@ if origins = blank_to_nil.(System.get_env("HUMANPORT_MCP_ALLOWED_ORIGINS")) do
     mcp_allowed_origins: origins |> String.split(",") |> Enum.map(&String.trim/1)
 end
 
+# 02.1-03-PLAN.md Task 1 Part D — the MCP `await` tool's own ceiling,
+# independent of (but defaulting to match) HUMANPORT_LONG_POLL_MAX_WAIT_SECONDS
+# above. Same `blank_to_nil` idiom, for the same `${VAR:-}` compose.yaml
+# reason as every other runtime-configured integer in this file: an
+# unconfigured variable renders as the empty string, and `String.to_integer("")`
+# would raise at boot rather than falling through to the compile-time
+# default (config/config.exs).
+if raw_await_timeout =
+     blank_to_nil.(System.get_env("HUMANPORT_MCP_AWAIT_TIMEOUT_SECONDS")) do
+  config :humanport, mcp_await_timeout_ms: String.to_integer(raw_await_timeout) * 1_000
+end
+
 if config_env() == :dev do
   # Reload browser tabs when matching files change.
   config :humanport, HumanportWeb.Endpoint,
