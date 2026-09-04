@@ -402,4 +402,91 @@ defmodule Humanport.Requests.ChooseTest do
       assert metadata["selected_options"] == [%{"id" => "opt-b", "label" => "Option B"}]
     end
   end
+
+  # --- Task 3 — the wire shape --------------------------------------------
+
+  describe "rendering — options, allow_free_text, max_selections" do
+    test "a rendered request carries its options field for field, in the order stored" do
+      options = [
+        %{id: "opt-1", label: "First", description: "d1", recommended: false},
+        %{id: "opt-2", label: "Second"}
+      ]
+
+      request =
+        choose_request_fixture(%{options: options, allow_free_text: true, max_selections: 2})
+
+      rendered = HumanportWeb.RequestJSON.show(%{request: request})
+
+      assert rendered.options == [
+               %{id: "opt-1", label: "First", description: "d1", recommended: false},
+               %{id: "opt-2", label: "Second", description: nil, recommended: nil}
+             ]
+
+      assert rendered.allow_free_text == true
+      assert rendered.max_selections == 2
+    end
+
+    test "a request with no options renders a null options field, not an empty list" do
+      request = request_fixture(%{type: :ask})
+
+      rendered = HumanportWeb.RequestJSON.show(%{request: request})
+
+      assert rendered.options == nil
+    end
+
+    test "a request submitted with an empty option list is refused before it can be rendered" do
+      # There is no way to observe an empty (as opposed to null) options
+      # field on the wire — `ChooseRequiresOptions` refuses the create
+      # before a row exists (see the "type follows from the presence of
+      # options" describe block above) — recorded here so the two cases
+      # (`nil` vs `[]`) are not silently conflated.
+      assert {:error, %Ash.Error.Invalid{}} =
+               Requests.submit(
+                 %{type: :choose, title: "Nothing to choose from", options: []},
+                 default_actor()
+               )
+    end
+
+    test "a pending choose request renders a null result, exactly as every other pending request does" do
+      request = choose_request_fixture()
+
+      rendered = HumanportWeb.RequestJSON.show(%{request: request})
+
+      assert rendered.result == nil
+    end
+  end
+
+  describe "rendering — a completed choice renders as a choice, not a decision" do
+    test "the result carries the selected id list, never the approve/reject decision field" do
+      request = choose_request_fixture()
+
+      assert {:ok, chosen} =
+               Requests.choose(request, %{selected_option_ids: ["opt-a"]}, default_actor())
+
+      rendered = HumanportWeb.RequestJSON.show(%{request: chosen})
+
+      assert rendered.result.selected_option_ids == ["opt-a"]
+      assert rendered.result.free_text == nil
+      assert %{"verified" => false} = rendered.result.decided_by
+      assert %DateTime{} = rendered.result.decided_at
+
+      refute Map.has_key?(rendered.result, :decision)
+    end
+
+    test "free text on a completed choice renders in the result" do
+      request = choose_request_fixture(%{allow_free_text: true})
+
+      assert {:ok, chosen} =
+               Requests.choose(
+                 request,
+                 %{selected_option_ids: [], free_text: "other"},
+                 default_actor()
+               )
+
+      rendered = HumanportWeb.RequestJSON.show(%{request: chosen})
+
+      assert rendered.result.selected_option_ids == []
+      assert rendered.result.free_text == "other"
+    end
+  end
 end

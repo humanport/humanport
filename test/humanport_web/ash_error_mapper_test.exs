@@ -46,8 +46,10 @@ defmodule HumanportWeb.AshErrorMapperTest do
     end
 
     test "an unimplemented request type classifies as :not_implemented, distinct from :invalid" do
+      # CORE-04 — `choose` is implemented now; `escalate` (Phase 5) is the
+      # one genuinely unimplemented type left.
       assert {:error, error} =
-               Requests.submit(%{"type" => "choose", "title" => "x"}, default_actor())
+               Requests.submit(%{"type" => "escalate", "title" => "x"}, default_actor())
 
       assert {:not_implemented, message} = AshErrorMapper.classify(error)
       assert message =~ "answers only"

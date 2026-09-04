@@ -136,7 +136,7 @@ defmodule HumanportWeb.RequestControllerTest do
         assert body["error"]["code"] == "not_implemented"
 
         assert body["error"]["message"] ==
-                 "HumanPort recorded a #{type} request, but this version answers only ask and approve."
+                 "HumanPort recorded a #{type} request, but this version answers only ask, approve and choose."
       end
     end
   end

@@ -102,7 +102,10 @@ defmodule HumanportWeb.AshErrorMapper do
 
   defp not_implemented_type?(_), do: false
 
+  # CORE-04 — this sentence became false the moment `choose` shipped
+  # (02.1-RESEARCH.md Pitfall 5, 02.1-PATTERNS.md's confirmed required
+  # edit): `escalate` is now the one genuinely unimplemented type.
   defp not_implemented_message(%Ash.Error.Changes.InvalidAttribute{value: value}) do
-    "HumanPort recorded a #{value} request, but this version answers only ask and approve."
+    "HumanPort recorded a #{value} request, but this version answers only ask, approve and choose."
   end
 end
