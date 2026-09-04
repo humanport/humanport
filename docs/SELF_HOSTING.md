@@ -140,6 +140,29 @@ The `db` service's own credentials (`POSTGRES_USER`, `POSTGRES_PASSWORD`,
 `POSTGRES_DB`) are fixed in `compose.yaml` and match `DATABASE_URL`'s default —
 change them together if you change either.
 
+## `POST /api/v1/requests/:id/respond` body shapes
+
+The body's shape is decided by the request's own type, not by a field
+naming the type explicitly:
+
+- An `ask` request: `{"answer": "<free text>"}`.
+- An `approve` request: `{"decision": "approve"}` or `{"decision": "reject"}`.
+- A `choose` request (CORE-04): `{"selected_option_ids": ["<id>", ...]}`
+  (a list, possibly empty when free text is given instead), and/or
+  `{"free_text": "<text>"}` on a request whose `allow_free_text` is `true`.
+  A body naming `selected_option_ids` is dispatched ahead of a free-text-only
+  body, so a body carrying both goes through the identical
+  `Humanport.Requests.choose/3` call with both fields exactly as sent —
+  there is one write path here too, the same domain function the `choose`
+  MCP tool's own answer path and the web inbox's decision block both call.
+  The result renders `selected_option_ids` (a list, even for one selection)
+  and `free_text`, alongside `decided_by`/`decided_at` — never the
+  approve/reject `decision` field, which a `choose` result never carries.
+
+Sending the wrong shape for the request's own type is `422` (`invalid`),
+never `409` — an agent's retry loop needs to be able to tell "this call was
+malformed" apart from "someone else already answered."
+
 ## The MCP endpoint
 
 `POST /mcp` is the same product as `POST /api/v1/requests` and its two
@@ -173,11 +196,29 @@ trail from one created over `/api/v1` — there is one write path, not two.
   [Setting `HUMANPORT_CF_ACCESS_TEAM_DOMAIN`](#setting-humanport_cf_access_team_domain-changes-what-an-unauthenticated-request-gets)
   above. Without it, `/mcp` is exactly as unauthenticated as the rest of this
   version.
-- **Four tools so far.** `tools/list` currently returns `ask` (creates a
+- **Five tools so far.** `tools/list` currently returns `ask` (creates a
   free-text request), `approve` (creates an approval request — it asks a
-  human to approve or reject; it does NOT itself decide anything), `check`
-  (an immediate, non-waiting glance at a request's current state) and
-  `await` (see below). `choose` is later work, not yet reachable here.
+  human to approve or reject; it does NOT itself decide anything), `choose`
+  (creates a request asking a human to pick from a set of caller-supplied,
+  opaque named options — CORE-04; it does NOT itself decide anything
+  either, and the options it is given are stored and returned unchanged,
+  never interpreted), `check` (an immediate, non-waiting glance at a
+  request's current state) and `await` (see below). `escalate` is later
+  work, not yet reachable here.
+  - A `choose` call's `options` argument is a list of `{id, label,
+    description?, recommended?}` objects. `id` and `label` are required;
+    `description` and `recommended` are optional and come back exactly as
+    absent when omitted — never defaulted to a value HumanPort invented.
+    `recommended` is advice shown beside an option, never a default and
+    never a pre-selection: a human who submits without choosing submits
+    nothing, regardless of which option (if any) was marked recommended.
+  - The human's answer, once made, is always a **list** of chosen option
+    ids — even when only one may be chosen (`max_selections`, defaulting to
+    `1`) — because a scalar result now would have to become a list later,
+    breaking the published contract exactly when the first SDKs exist. When
+    `allow_free_text` is `true`, the human may answer with free text
+    instead of an option id; the result names which happened by which of
+    `selected_option_ids`/`free_text` came back populated.
 - **`check` and `await` are the same primitive's two branches.** `check`
   reads and returns immediately, whatever the request's state. `await`
   holds the connection open until the request is answered or its own

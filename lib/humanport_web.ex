@@ -93,6 +93,7 @@ defmodule HumanportWeb do
       import HumanPort.UI.AgentBadge
       import HumanPort.UI.AnswerCard
       import HumanPort.UI.ApprovalCard
+      import HumanPort.UI.ChoiceCard
       import HumanPort.UI.ContextBlock
       import HumanPort.UI.FilterTabs
       import HumanPort.UI.MetaList

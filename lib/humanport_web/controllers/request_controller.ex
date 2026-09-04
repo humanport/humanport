@@ -20,9 +20,13 @@ defmodule HumanportWeb.RequestController do
   of its own. `HumanportWeb.MCP.Tools.Await` calls the exact same module.
 
   `POST /api/v1/requests/:id/respond` → 200, or 409 conflict / 422 invalid /
-  404 not found. Body carries `"answer"` for an `ask` request or
-  `"decision": "approve" | "reject"` for an `approve` request; sending the
-  wrong shape for the request's type is a 422, not a 409 — see
+  404 not found. Body carries `"answer"` for an `ask` request,
+  `"decision": "approve" | "reject"` for an `approve` request, or
+  `"selected_option_ids"` (a list, possibly empty) and/or `"free_text"` for
+  a `choose` request (CORE-04) — a body naming a selection is dispatched
+  ahead of a free-text-only body, so a body carrying both goes through
+  `Humanport.Requests.choose/3` with both fields exactly as sent. Sending
+  the wrong shape for the request's type is a 422, not a 409 — see
   `HumanportWeb.FallbackController`.
 
   Errors render as `{"error": {"code", "message", "details"}}` with the code
@@ -96,8 +100,33 @@ defmodule HumanportWeb.RequestController do
     Requests.answer(request, answer, actor)
   end
 
+  # CORE-04 — a body naming a selection is dispatched ahead of the
+  # free-text-only clause below, so a body carrying BOTH (the case this
+  # controller's own test file pins explicitly) always goes through
+  # `Requests.choose/3` with both fields it was sent, never ambiguously.
+  # `selected_option_ids` may be `[]` — a choose request's free-text-only
+  # answer, when a caller sends the key explicitly rather than omitting it.
+  defp dispatch_respond(request, %{"selected_option_ids" => selected_option_ids} = params, actor)
+       when is_list(selected_option_ids) do
+    Requests.choose(
+      request,
+      %{selected_option_ids: selected_option_ids, free_text: Map.get(params, "free_text")},
+      actor
+    )
+  end
+
+  # A caller who omits `selected_option_ids` entirely and sends only
+  # `free_text` — the choose request's free-text-only answer, in its
+  # shortest form.
+  defp dispatch_respond(request, %{"free_text" => free_text}, actor) when is_binary(free_text) do
+    Requests.choose(request, %{selected_option_ids: [], free_text: free_text}, actor)
+  end
+
   defp dispatch_respond(_request, _params, _actor) do
-    invalid_field_error(:body, "request body must include either \"answer\" or \"decision\"")
+    invalid_field_error(
+      :body,
+      "request body must include \"answer\", \"decision\", or \"selected_option_ids\""
+    )
   end
 
   defp invalid_field_error(field, message) do

@@ -13,6 +13,7 @@ defmodule HumanportWeb.HumanPortUITest do
 
   alias HumanPort.UI.ActorIdentity
   alias HumanPort.UI.AgentBadge
+  alias HumanPort.UI.ChoiceCard
   alias HumanPort.UI.ContextBlock
   alias HumanPort.UI.FilterTabs
   alias HumanPort.UI.MetaList
@@ -347,6 +348,149 @@ defmodule HumanportWeb.HumanPortUITest do
         })
 
       refute html =~ "(current)"
+    end
+  end
+
+  describe "ChoiceCard (02.1-05-PLAN.md Task 2, CORE-04)" do
+    test "renders every option's label and description, and an advisory marker only where sent" do
+      html =
+        render_component(&ChoiceCard.choice_card/1, %{
+          id: "choice-1",
+          state: :editing,
+          options: [
+            %{id: "a", label: "Option A", description: "First path", recommended: nil},
+            %{id: "b", label: "Option B", description: nil, recommended: true}
+          ]
+        })
+
+      assert html =~ "Option A"
+      assert html =~ "First path"
+      assert html =~ "Option B"
+      assert html =~ "suggested"
+    end
+
+    test "on first render no option carries a checked attribute — including the recommended one",
+         %{} do
+      html =
+        render_component(&ChoiceCard.choice_card/1, %{
+          id: "choice-2",
+          state: :editing,
+          options: [
+            %{id: "a", label: "Option A", description: nil, recommended: nil},
+            %{id: "b", label: "Option B", description: nil, recommended: true}
+          ]
+        })
+
+      # Asserted against the rendered markup — the hazard is a template that
+      # emits `checked` derived from `recommended` regardless of what the
+      # `selected_option_id` assign says.
+      refute html =~ "checked"
+    end
+
+    test "an option label containing markup renders escaped, as text" do
+      html =
+        render_component(&ChoiceCard.choice_card/1, %{
+          id: "choice-3",
+          state: :editing,
+          options: [
+            %{id: "a", label: "<script>alert(1)</script>", description: nil, recommended: nil}
+          ]
+        })
+
+      refute html =~ "<script>alert(1)</script>"
+      assert html =~ "&lt;script&gt;"
+    end
+
+    test "a long option label wraps — no truncation, ellipsis, clamp or non-wrapping class anywhere" do
+      long_label = String.duplicate("a very long option label word ", 20)
+
+      html =
+        render_component(&ChoiceCard.choice_card/1, %{
+          id: "choice-4",
+          state: :editing,
+          options: [%{id: "a", label: long_label, description: nil, recommended: nil}]
+        })
+
+      assert html =~ long_label
+      refute html =~ "truncate"
+      refute html =~ "text-ellipsis"
+      refute html =~ "whitespace-nowrap"
+      refute html =~ "line-clamp"
+    end
+
+    test "the submit control is disabled until a selection exists, and nothing submits on change" do
+      html =
+        render_component(&ChoiceCard.choice_card/1, %{
+          id: "choice-5",
+          state: :editing,
+          options: [%{id: "a", label: "Option A", description: nil, recommended: nil}]
+        })
+
+      assert html =~ "disabled"
+      refute html =~ "phx-submit"
+    end
+
+    test "the free-text field appears only when allow_free_text is true" do
+      with_flag =
+        render_component(&ChoiceCard.choice_card/1, %{
+          id: "choice-6",
+          state: :editing,
+          allow_free_text: true,
+          options: [%{id: "a", label: "Option A", description: nil, recommended: nil}]
+        })
+
+      without_flag =
+        render_component(&ChoiceCard.choice_card/1, %{
+          id: "choice-7",
+          state: :editing,
+          allow_free_text: false,
+          options: [%{id: "a", label: "Option A", description: nil, recommended: nil}]
+        })
+
+      assert with_flag =~ "Or write your own answer"
+      refute without_flag =~ "Or write your own answer"
+    end
+
+    test "with an option selected, the submit control is enabled" do
+      html =
+        render_component(&ChoiceCard.choice_card/1, %{
+          id: "choice-8",
+          state: :editing,
+          selected_option_id: "a",
+          options: [%{id: "a", label: "Option A", description: nil, recommended: nil}]
+        })
+
+      refute html =~ "disabled"
+    end
+
+    test "the decided state names the chosen option's label, who decided and when" do
+      html =
+        render_component(&ChoiceCard.choice_card/1, %{
+          id: "choice-9",
+          state: :decided,
+          options: [%{id: "a", label: "Option A", description: nil, recommended: nil}],
+          selected_option_ids: ["a"],
+          decided_by: %{"label" => "owner@localhost"},
+          decided_at: ~U[2026-09-04 12:00:00Z]
+        })
+
+      assert html =~ "Option A"
+      assert html =~ "owner@localhost"
+    end
+
+    test "the decided state names free text when that is what was given" do
+      html =
+        render_component(&ChoiceCard.choice_card/1, %{
+          id: "choice-10",
+          state: :decided,
+          options: [%{id: "a", label: "Option A", description: nil, recommended: nil}],
+          selected_option_ids: [],
+          free_text: "Neither of these — do this instead.",
+          decided_by: %{"label" => "owner@localhost"},
+          decided_at: ~U[2026-09-04 12:00:00Z]
+        })
+
+      assert html =~ "Neither of these — do this instead."
     end
   end
 end

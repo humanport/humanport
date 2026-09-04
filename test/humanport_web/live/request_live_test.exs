@@ -246,6 +246,127 @@ defmodule HumanportWeb.Live.RequestLiveTest do
     end
   end
 
+  describe "the choice — choose request (CORE-04, 02.1-05-PLAN.md Task 2)" do
+    test "no option is pre-selected on first render, including the recommended one", %{
+      conn: conn
+    } do
+      request = choose_request_fixture(%{title: "Pick a path"})
+      {:ok, _view, html} = live(conn, ~p"/requests/#{request.id}")
+
+      # Asserted against the rendered markup, not the socket's assigns —
+      # the assign could be empty while the template still emitted a
+      # `checked` attribute derived from `recommended`.
+      refute html =~ "checked"
+      assert html =~ "Option A"
+      assert html =~ "Option B"
+      assert html =~ "suggested"
+    end
+
+    test "submit stays disabled until a selection is made", %{conn: conn} do
+      request = choose_request_fixture(%{title: "Pick a path"})
+      {:ok, view, html} = live(conn, ~p"/requests/#{request.id}")
+
+      assert html =~ "Choose an option to enable Submit choice."
+      assert has_element?(view, "button[disabled]", "Submit choice")
+
+      view
+      |> form("#choice-#{request.id}-form", %{"selected_option_id" => "opt-a"})
+      |> render_change()
+
+      assert has_element?(view, "button:not([disabled])", "Submit choice")
+    end
+
+    test "no handler submits on change, on blur, or on a timer", %{conn: conn} do
+      request = choose_request_fixture(%{title: "Pick a path"})
+      {:ok, _view, html} = live(conn, ~p"/requests/#{request.id}")
+
+      refute html =~ ~s(phx-submit="choice_submit")
+    end
+
+    test "selecting an option and pressing submit records a one-element selection list, and the timeline shows a sentence for the choice",
+         %{conn: conn} do
+      request = choose_request_fixture(%{title: "Pick a path"})
+      {:ok, view, _html} = live(conn, ~p"/requests/#{request.id}")
+
+      view
+      |> form("#choice-#{request.id}-form", %{"selected_option_id" => "opt-a"})
+      |> render_change()
+
+      html =
+        view
+        |> element("button", "Submit choice")
+        |> render_click()
+
+      assert html =~ "Option A"
+      assert html =~ "owner@localhost"
+      assert html =~ "chose an option"
+
+      {:ok, chosen} = Humanport.Requests.get_request(request.id)
+      assert chosen.selected_option_ids == ["opt-a"]
+    end
+
+    test "on a request whose free-text flag is true, a text field appears and free text can be submitted with no selection",
+         %{conn: conn} do
+      request = choose_request_fixture(%{title: "Free text allowed", allow_free_text: true})
+      {:ok, view, html} = live(conn, ~p"/requests/#{request.id}")
+
+      assert html =~ "Or write your own answer"
+
+      view
+      |> form("#choice-#{request.id}-form", %{"free_text" => "Neither of these."})
+      |> render_change()
+
+      html =
+        view
+        |> element("button", "Submit choice")
+        |> render_click()
+
+      assert html =~ "Neither of these."
+
+      {:ok, chosen} = Humanport.Requests.get_request(request.id)
+      assert chosen.selected_option_ids == []
+      assert chosen.answer == "Neither of these."
+    end
+
+    test "on a request whose free-text flag is false, no text field appears", %{conn: conn} do
+      request = choose_request_fixture(%{title: "No free text"})
+      {:ok, _view, html} = live(conn, ~p"/requests/#{request.id}")
+
+      refute html =~ "Or write your own answer"
+    end
+
+    test "a losing concurrent submission surfaces the conflict message and the refreshed state",
+         %{
+           conn: conn
+         } do
+      request = choose_request_fixture(%{title: "Race"})
+      {:ok, view, _html} = live(conn, ~p"/requests/#{request.id}")
+
+      view
+      |> form("#choice-#{request.id}-form", %{"selected_option_id" => "opt-a"})
+      |> render_change()
+
+      # A concurrent responder decides the request via a raw update that
+      # bypasses Ash (and therefore never broadcasts) — the same stale-client
+      # scenario the approval asymmetry test above exercises.
+      import Ecto.Query
+
+      Humanport.Repo.update_all(
+        from(r in Humanport.Requests.HumanRequest, where: r.id == ^request.id),
+        set: [state: "answered", selected_option_ids: ["opt-b"], completed_at: DateTime.utc_now()]
+      )
+
+      html =
+        view
+        |> element("button", "Submit choice")
+        |> render_click()
+
+      assert html =~ "was already answered"
+      assert html =~ "was not recorded"
+      assert html =~ "Option B"
+    end
+  end
+
   describe "error paths" do
     test "an unknown identifier renders the not-found copy with a route back to the inbox", %{
       conn: conn
@@ -256,16 +377,18 @@ defmodule HumanportWeb.Live.RequestLiveTest do
       assert to == ~p"/requests"
     end
 
-    test "a choose or escalate request renders the not-implemented copy and no response control" do
-      # D-06 rejects creating a choose/escalate request explicitly — build
-      # one directly against the resource to exercise the defensive render
-      # for a row created before that guard, or from a console.
+    test "an escalate request renders the not-implemented copy and no response control" do
+      # 02.1-05-PLAN.md Task 2 — narrowed from `choose or escalate` to
+      # `escalate` alone: `choose` is now answerable via `ChoiceCard`.
+      # D-06 rejects creating an escalate request explicitly — build one
+      # directly against the resource to exercise the defensive render for a
+      # row created before that guard, or from a console.
       {:ok, request} =
         Humanport.Requests.HumanRequest
         |> Ash.Changeset.for_create(:submit, %{type: :ask, title: "will be forced"},
           actor: default_actor()
         )
-        |> Ash.Changeset.force_change_attribute(:type, :choose)
+        |> Ash.Changeset.force_change_attribute(:type, :escalate)
         |> Ash.create()
 
       conn = Phoenix.ConnTest.build_conn()

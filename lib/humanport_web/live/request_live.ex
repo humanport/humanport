@@ -38,7 +38,12 @@ defmodule HumanportWeb.RequestLive do
 
         {:ok,
          socket
-         |> assign(confirm_value: "", answer_value: "")
+         |> assign(
+           confirm_value: "",
+           answer_value: "",
+           choice_selected_option_id: nil,
+           choice_free_text_value: ""
+         )
          |> load_request(request)}
 
       {:error, _error} ->
@@ -100,6 +105,53 @@ defmodule HumanportWeb.RequestLive do
     end
   end
 
+  # CORE-04 — `ChoiceCard`'s own two handlers. `choice_change` records the
+  # form's current selection/free-text into the socket; nothing here
+  # submits anything. `choice_submit` is the only path that calls
+  # `Humanport.Requests.choose/3` — never a changeset, exactly the rule this
+  # module's own moduledoc already states for the other three decisions.
+  def handle_event("choice_change", params, socket) do
+    {:noreply,
+     assign(socket,
+       choice_selected_option_id: Map.get(params, "selected_option_id"),
+       choice_free_text_value: Map.get(params, "free_text", "")
+     )}
+  end
+
+  def handle_event("choice_submit", _params, socket) do
+    socket = assign(socket, :choice_state, :submitting)
+    selection = build_choice_selection(socket.assigns)
+
+    case Requests.choose(socket.assigns.request, selection, socket.assigns.actor) do
+      {:ok, chosen} ->
+        {:noreply, load_request(socket, chosen)}
+
+      {:error, error} ->
+        {:noreply, handle_response_error(socket, error, :choice_state, :editing)}
+    end
+  end
+
+  # A selection, when one was made, always wins over free text — the card
+  # never sends both, so a reader of the result can tell which happened by
+  # which field came back populated (locked decision 4).
+  defp build_choice_selection(%{choice_selected_option_id: id}) when is_binary(id) and id != "" do
+    %{selected_option_ids: [id]}
+  end
+
+  defp build_choice_selection(assigns) do
+    free_text =
+      case assigns[:choice_free_text_value] do
+        value when is_binary(value) ->
+          trimmed = String.trim(value)
+          if trimmed == "", do: nil, else: value
+
+        _ ->
+          nil
+      end
+
+    %{selected_option_ids: [], free_text: free_text}
+  end
+
   # ---- request/state loading -------------------------------------------
 
   defp load_request(socket, request) do
@@ -121,7 +173,8 @@ defmodule HumanportWeb.RequestLive do
       confirm_token: token,
       events: timeline_events(events),
       answer_state: if(request.completed_at, do: :decided, else: :editing),
-      decision_state: decision_state
+      decision_state: decision_state,
+      choice_state: if(request.completed_at, do: :decided, else: :editing)
     )
   end
 
@@ -237,6 +290,9 @@ defmodule HumanportWeb.RequestLive do
 
   defp event_sentence(%{event_type: "request.rejected"} = event),
     do: actor_identity_sentence(event, gettext("rejected it."))
+
+  defp event_sentence(%{event_type: "request.chosen"} = event),
+    do: actor_identity_sentence(event, gettext("chose an option."))
 
   defp event_sentence(event), do: event.event_type
 
@@ -371,8 +427,23 @@ defmodule HumanportWeb.RequestLive do
           agent={@request.requester_label}
         />
 
+        <.choice_card
+          :if={@request.type == :choose}
+          id={"choice-#{@request.id}"}
+          state={@choice_state}
+          options={@request.options || []}
+          allow_free_text={@request.allow_free_text}
+          selected_option_id={@choice_selected_option_id}
+          free_text_value={@choice_free_text_value}
+          selected_option_ids={@request.selected_option_ids}
+          free_text={@request.answer}
+          decided_by={@request.decided_by}
+          decided_at={@request.completed_at}
+          agent={@request.requester_label}
+        />
+
         <div
-          :if={@request.type in [:choose, :escalate]}
+          :if={@request.type == :escalate}
           class="flex flex-col gap-2 rounded-inner border border-border-hairline bg-surface-raised p-4 font-mono text-[length:var(--hp-text-body)]"
         >
           <p class="font-bold text-text-primary">
@@ -380,7 +451,7 @@ defmodule HumanportWeb.RequestLive do
           </p>
           <p class="text-text-secondary">
             {gettext(
-              "HumanPort recorded a %{type} request, but this version answers only ask and approve. Nothing will happen to it.",
+              "HumanPort recorded a %{type} request, but this version answers only ask, approve and choose. Nothing will happen to it.",
               type: @request.type
             )}
           </p>
