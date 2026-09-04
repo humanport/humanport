@@ -187,6 +187,83 @@ defmodule HumanportWeb.MCP.ParityTest do
     assert http_audit["source_protocol"] == nil
   end
 
+  test "a choose request created over MCP and one created over plain HTTP, with the same options, are field-by-field indistinguishable and neither audit event carries a channel marker" do
+    mcp_conn = Phoenix.ConnTest.build_conn()
+    http_conn = Phoenix.ConnTest.build_conn()
+
+    options = [
+      %{"id" => "opt-a", "label" => "Roll back"},
+      %{"id" => "opt-b", "label" => "Roll forward", "recommended" => true}
+    ]
+
+    shared_params = %{
+      "options" => options,
+      "allow_free_text" => true,
+      "max_selections" => 1,
+      "requester_label" => "parity-test"
+    }
+
+    mcp_task =
+      Task.async(fn ->
+        body =
+          McpFixtures.call_tool_request(
+            "parity-choose-mcp",
+            "choose",
+            Map.put(shared_params, "title", "parity choose — MCP side")
+          )
+
+        resp =
+          mcp_conn
+          |> put_headers(McpFixtures.headers_for(body))
+          |> Phoenix.ConnTest.post("/mcp", Jason.encode!(body))
+
+        response = Phoenix.ConnTest.json_response(resp, 200)
+        response["result"]["structuredContent"]["id"]
+      end)
+
+    http_task =
+      Task.async(fn ->
+        params = Map.put(shared_params, "title", "parity choose — HTTP side")
+        resp = Phoenix.ConnTest.post(http_conn, "/api/v1/requests", params)
+        response = Phoenix.ConnTest.json_response(resp, 201)
+        response["id"]
+      end)
+
+    [mcp_id, http_id] = Task.await_many([mcp_task, http_task], 5_000)
+
+    cleanup_request(mcp_id)
+    cleanup_request(http_id)
+
+    {:ok, mcp_request} = Requests.get_request(mcp_id)
+    {:ok, http_request} = Requests.get_request(http_id)
+
+    assert mcp_request.type == :choose
+    assert http_request.type == :choose
+
+    mcp_payload =
+      %{request: mcp_request}
+      |> HumanportWeb.RequestJSON.show()
+      |> Jason.encode!()
+      |> Jason.decode!()
+
+    http_payload =
+      %{request: http_request}
+      |> HumanportWeb.RequestJSON.show()
+      |> Jason.encode!()
+      |> Jason.decode!()
+
+    assert Map.drop(mcp_payload, @excluded_result_keys) ==
+             Map.drop(http_payload, @excluded_result_keys)
+
+    mcp_audit = audit_row(mcp_id, "request.created")
+    http_audit = audit_row(http_id, "request.created")
+
+    assert mcp_audit["source_protocol"] == nil
+    assert http_audit["source_protocol"] == nil
+    assert mcp_audit["correlation_id"] == nil
+    assert http_audit["correlation_id"] == nil
+  end
+
   defp put_headers(conn, headers) do
     Enum.reduce(headers, conn, fn {k, v}, acc -> Plug.Conn.put_req_header(acc, k, v) end)
   end

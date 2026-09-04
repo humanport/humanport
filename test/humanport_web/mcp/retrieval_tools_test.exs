@@ -139,10 +139,13 @@ defmodule HumanportWeb.MCP.RetrievalToolsTest do
     end
   end
 
-  describe "tools/list — exactly four entries" do
-    test "returns ask, check, approve and await, and validates against ListToolsResult", %{
-      conn: conn
-    } do
+  describe "tools/list — exactly five entries" do
+    # Widened from four to five by 02.1-05-PLAN.md Task 1, which registers
+    # `choose` as the third creation tool — a stale-test site the plan
+    # itself did not enumerate (Rule 1: found by this task's own full-suite
+    # run, not by the plan's own drift-check).
+    test "returns ask, check, approve, await and choose, and validates against ListToolsResult",
+         %{conn: conn} do
       body = McpFixtures.list_tools_request("list-1")
       resp = post_mcp(conn, body)
 
@@ -150,11 +153,12 @@ defmodule HumanportWeb.MCP.RetrievalToolsTest do
       McpSchema.assert_valid!(response["result"], "ListToolsResult")
 
       names = Enum.map(response["result"]["tools"], & &1["name"])
-      assert length(names) == 4
+      assert length(names) == 5
       assert "ask" in names
       assert "check" in names
       assert "approve" in names
       assert "await" in names
+      assert "choose" in names
     end
   end
 

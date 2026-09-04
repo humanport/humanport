@@ -14,8 +14,13 @@ defmodule HumanportWeb.MCP.Tools do
   alias HumanportWeb.MCP.Tools.Ask
   alias HumanportWeb.MCP.Tools.Await
   alias HumanportWeb.MCP.Tools.Check
+  alias HumanportWeb.MCP.Tools.Choose
 
-  @tools [Ask, Check, Approve, Await]
+  # `Choose` is deliberately last — the fifth entry in the advertised list,
+  # the third creation tool alongside `Ask`/`Approve` (02.1-05-PLAN.md
+  # Task 1). Appending rather than reordering keeps the list's existing
+  # positions stable across this change.
+  @tools [Ask, Check, Approve, Await, Choose]
 
   @doc "The ordered list of tool modules — what a `tools/list` result enumerates."
   def all, do: @tools
