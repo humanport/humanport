@@ -123,6 +123,11 @@ defmodule Humanport.Requests.HumanRequest do
       transition :answer, from: :pending, to: :answered
       transition :approve, from: :pending, to: :approved
       transition :reject, from: :pending, to: :rejected
+      # CORE-04 — reuses the existing `:answered` terminal state rather than
+      # introducing a new `:chosen` state (02.1-PATTERNS.md's explicit,
+      # confirmed recommendation). A choice is a kind of answer; this keeps
+      # every hardcoded terminal-state list in the codebase unchanged.
+      transition :choose, from: :pending, to: :answered
     end
   end
 
@@ -220,6 +225,25 @@ defmodule Humanport.Requests.HumanRequest do
       change set_attribute(:completed_at, &DateTime.utc_now/0)
       change transition_state(:rejected)
       change {Humanport.Requests.Changes.SetDecidedBy, []}
+    end
+
+    # CORE-04 — shaped line for line like `:answer` above, on purpose: same
+    # atomicity guard, same absence of any non-atomic change. Only what it
+    # sets differs. `Humanport.Requests.choose/3` validates membership,
+    # count and free-text eligibility BEFORE calling this action (see that
+    # module for why those checks live there and not here) — this action
+    # trusts its arguments and does nothing but write them atomically.
+    update :choose do
+      argument :selected_option_ids, {:array, :string}, allow_nil?: false
+      argument :free_text, :string, allow_nil?: true
+
+      change filter(expr(is_nil(completed_at)))
+      change set_attribute(:selected_option_ids, arg(:selected_option_ids))
+      change set_attribute(:answer, arg(:free_text))
+      change set_attribute(:completed_at, &DateTime.utc_now/0)
+      change transition_state(:answered)
+      change {Humanport.Requests.Changes.SetDecidedBy, []}
+      # NO `change after_action(...)` here — see the moduledoc landmine.
     end
   end
 

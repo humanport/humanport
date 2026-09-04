@@ -205,4 +205,201 @@ defmodule Humanport.Requests.ChooseTest do
       assert Enum.any?(error.errors, &match?(%Ash.Error.Invalid.NoSuchInput{}, &1))
     end
   end
+
+  # --- Task 2 — Requests.choose/3 and the atomic :choose action ---------
+
+  describe "choosing one offered id succeeds" do
+    test "the request reaches the answered terminal state with a one-element selection" do
+      request = choose_request_fixture()
+
+      assert {:ok, chosen} =
+               Requests.choose(request, %{selected_option_ids: ["opt-a"]}, default_actor())
+
+      assert chosen.state == :answered
+      assert chosen.selected_option_ids == ["opt-a"]
+      refute is_nil(chosen.completed_at)
+      refute is_nil(chosen.decided_by)
+    end
+
+    test "the selection is a list even for a single choice" do
+      request = choose_request_fixture()
+
+      assert {:ok, chosen} =
+               Requests.choose(request, %{selected_option_ids: ["opt-a"]}, default_actor())
+
+      assert is_list(chosen.selected_option_ids)
+    end
+  end
+
+  describe "max_selections is enforced before any write" do
+    test "choosing two ids on a maximum of one names both the count sent and the maximum allowed" do
+      request = choose_request_fixture()
+
+      assert {:error, %Ash.Error.Invalid{} = error} =
+               Requests.choose(
+                 request,
+                 %{selected_option_ids: ["opt-a", "opt-b"]},
+                 default_actor()
+               )
+
+      assert Enum.any?(error.errors, fn
+               %Ash.Error.Changes.InvalidAttribute{field: :selected_option_ids, message: message} ->
+                 String.contains?(message, "2") and String.contains?(message, "1")
+
+               _ ->
+                 false
+             end)
+
+      assert {:ok, reloaded} = Requests.get_request(request.id)
+      assert reloaded.state == :pending
+      assert [%{event_type: "request.created"}] = audit_rows(request.id)
+    end
+  end
+
+  describe "an id the request never offered is refused as malformed, not as a conflict" do
+    test "an unoffered id is refused" do
+      request = choose_request_fixture()
+
+      assert {:error, %Ash.Error.Invalid{} = error} =
+               Requests.choose(request, %{selected_option_ids: ["nope"]}, default_actor())
+
+      refute Enum.any?(error.errors, &match?(%AshStateMachine.Errors.NoMatchingTransition{}, &1))
+      refute Enum.any?(error.errors, &match?(%Ash.Error.Changes.StaleRecord{}, &1))
+
+      assert Enum.any?(error.errors, &match?(%Ash.Error.Changes.InvalidAttribute{}, &1))
+    end
+  end
+
+  describe "membership is exact string equality — no trimming, no case folding" do
+    test "an id differing only by surrounding whitespace is refused" do
+      request = choose_request_fixture()
+
+      assert {:error, %Ash.Error.Invalid{}} =
+               Requests.choose(request, %{selected_option_ids: [" opt-a "]}, default_actor())
+    end
+
+    test "an id differing only by case is refused" do
+      request = choose_request_fixture()
+
+      assert {:error, %Ash.Error.Invalid{}} =
+               Requests.choose(request, %{selected_option_ids: ["OPT-A"]}, default_actor())
+    end
+  end
+
+  describe "choosing the same id twice in one call is refused" do
+    test "a duplicate id is refused" do
+      request = choose_request_fixture()
+
+      assert {:error, %Ash.Error.Invalid{}} =
+               Requests.choose(
+                 request,
+                 %{selected_option_ids: ["opt-a", "opt-a"]},
+                 default_actor()
+               )
+    end
+  end
+
+  describe "free text (locked decision 4)" do
+    test "free text on a request whose flag is false is refused" do
+      request = choose_request_fixture()
+
+      assert {:error, %Ash.Error.Invalid{}} =
+               Requests.choose(
+                 request,
+                 %{selected_option_ids: [], free_text: "something else entirely"},
+                 default_actor()
+               )
+    end
+
+    test "free text on a request whose flag is true succeeds, leaves the selection an empty list, and the audit records text was given" do
+      request = choose_request_fixture(%{allow_free_text: true})
+
+      assert {:ok, chosen} =
+               Requests.choose(
+                 request,
+                 %{selected_option_ids: [], free_text: "something else entirely"},
+                 default_actor()
+               )
+
+      assert chosen.answer == "something else entirely"
+      assert chosen.selected_option_ids == []
+
+      assert [_created, %{event_type: "request.chosen", metadata: metadata}] =
+               audit_rows(request.id)
+
+      assert metadata["free_text_given"] == true
+      assert metadata["selected_options"] == []
+    end
+  end
+
+  describe "an empty selection with no free text is refused" do
+    test "nothing may be answered with nothing" do
+      request = choose_request_fixture()
+
+      assert {:error, %Ash.Error.Invalid{}} =
+               Requests.choose(request, %{selected_option_ids: []}, default_actor())
+    end
+  end
+
+  describe "type/action mismatch — refused as invalid, not as a conflict" do
+    test "choosing on a request that is not of the choose type is refused before the transaction opens" do
+      request = request_fixture(%{type: :ask, title: "Which changelog entry?"})
+
+      assert {:error, %Ash.Error.Invalid{} = error} =
+               Requests.choose(request, %{selected_option_ids: ["a"]}, default_actor())
+
+      refute Enum.any?(error.errors, &match?(%Ash.Error.Changes.StaleRecord{}, &1))
+      refute Enum.any?(error.errors, &match?(%AshStateMachine.Errors.NoMatchingTransition{}, &1))
+
+      assert {:ok, reloaded} = Requests.get_request(request.id)
+      assert reloaded.state == :pending
+      assert [%{event_type: "request.created"}] = audit_rows(request.id)
+    end
+  end
+
+  describe "the audit entry — D-13" do
+    test "exactly one request.chosen event is written per successful choice, carrying id and label" do
+      request = choose_request_fixture()
+
+      assert {:ok, chosen} =
+               Requests.choose(request, %{selected_option_ids: ["opt-b"]}, default_actor())
+
+      assert [%{event_type: "request.created"}, %{event_type: "request.chosen"} = choice_event] =
+               audit_rows(chosen.id)
+
+      assert choice_event.previous_state == "pending"
+      assert choice_event.new_state == "answered"
+
+      assert choice_event.metadata == %{
+               "selected_options" => [%{"id" => "opt-b", "label" => "Option B"}],
+               "free_text_given" => false
+             }
+    end
+
+    test "the audit entry records the label as it stood at decision time, not one resolved by id later" do
+      # Options are opaque per-request payloads with no global id registry
+      # (D-13's own reasoning): a caller reusing the same option id with a
+      # different label on a LATER request must not retroactively change
+      # what an EARLIER decision's audit entry says was shown. Since the
+      # `human_requests_terminal_is_final` trigger makes the terminal row
+      # itself immutable (by design — CORE-07), this is the only way to
+      # observe "resolved later" going wrong: it would require someone to
+      # follow the id back into a *different* record and re-derive the
+      # label from there, which nothing in `choose/3` ever does.
+      request = choose_request_fixture()
+
+      assert {:ok, chosen} =
+               Requests.choose(request, %{selected_option_ids: ["opt-b"]}, default_actor())
+
+      # A later, unrelated request reuses the id "opt-b" with a different
+      # label — the caller "renamed" the option in its own catalog.
+      _later_request =
+        choose_request_fixture(%{
+          options: [%{id: "opt-b", label: "Renamed after the fact"}]
+        })
+
+      assert [_created, %{metadata: metadata}] = audit_rows(chosen.id)
+      assert metadata["selected_options"] == [%{"id" => "opt-b", "label" => "Option B"}]
+    end
+  end
 end
