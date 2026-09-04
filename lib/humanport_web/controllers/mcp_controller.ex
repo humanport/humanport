@@ -73,6 +73,7 @@ defmodule HumanportWeb.McpController do
     end
   end
 
+  # -32600 — InvalidRequestError (schema definition `InvalidRequestError`).
   defp validate(_conn, _body) do
     {:error, :bad_request, -32600, "request body must be a JSON object", nil}
   end
