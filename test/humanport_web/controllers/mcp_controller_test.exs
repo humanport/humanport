@@ -7,10 +7,16 @@ defmodule HumanportWeb.McpControllerTest do
   schema (`Humanport.McpSchema`) rather than against a hand-written
   expectation of what the schema says (`02.1-CONTEXT.md` D-08a).
 
-  `async: false` — two describe blocks below swap
-  `config :humanport, :actor_resolver` for the duration of a test via
-  `Application.put_env/3` (the same pattern `resolve_actor_test.exs`
-  already uses), which is process-global state.
+  Task 2 — the refusal taxonomy: every protocol-level error code taken
+  from the vendored schema's own definitions, and the domain-level split
+  (malformed vs already-decided vs not-found) reported as a tool-originated
+  result rather than a JSON-RPC error, per the spec's own rule that an
+  error found IN a tool belongs in the result so the model can self-correct.
+
+  `async: false` — several tests below swap `config :humanport,
+  :actor_resolver` for the duration of a test via `Application.put_env/3`
+  (the same pattern `resolve_actor_test.exs` already uses), which is
+  process-global state.
   """
 
   use HumanportWeb.ConnCase, async: false
@@ -162,6 +168,144 @@ defmodule HumanportWeb.McpControllerTest do
       json_response(resp, 401)
       assert {:ok, []} = Requests.list_requests()
     end
+
+    test "a malformed ask call (missing the required title) is a tool-originated error, not a JSON-RPC error",
+         %{conn: conn} do
+      body = McpFixtures.call_tool_request("malformed-1", "ask", %{})
+      resp = post_mcp(conn, body)
+
+      response = json_response(resp, 200)
+      McpSchema.assert_valid!(response["result"], "CallToolResult")
+
+      refute Map.has_key?(response, "error")
+      assert response["result"]["isError"] == true
+      assert [%{"type" => "text", "text" => text}] = response["result"]["content"]
+      assert text =~ "title"
+
+      assert {:ok, []} = Requests.list_requests()
+    end
+  end
+
+  describe "the refusal taxonomy — protocol-level errors" do
+    test "a protocol-version header that disagrees with the body's _meta is refused 400/-32020", %{
+      conn: conn
+    } do
+      body = McpFixtures.discover_request("mismatch-1")
+
+      resp =
+        conn
+        |> put_headers(McpFixtures.headers_for(body))
+        |> put_req_header("mcp-protocol-version", "9999-01-01")
+        |> post(~p"/mcp", Jason.encode!(body))
+
+      response = json_response(resp, 400)
+      assert response["error"]["code"] == -32020
+      assert response["error"]["message"] =~ "mcp-protocol-version"
+    end
+
+    test "a missing mcp-method header is refused 400/-32020", %{conn: conn} do
+      body = McpFixtures.discover_request("missing-method-1")
+      headers = Enum.reject(McpFixtures.headers_for(body), fn {k, _} -> k == "mcp-method" end)
+
+      resp =
+        conn
+        |> put_headers(headers)
+        |> post(~p"/mcp", Jason.encode!(body))
+
+      response = json_response(resp, 400)
+      assert response["error"]["code"] == -32020
+      assert response["error"]["message"] =~ "mcp-method"
+    end
+
+    test "a tools/call missing the mcp-name header is refused 400/-32020", %{conn: conn} do
+      body = McpFixtures.call_tool_request("missing-name-1", "ask", %{"title" => "x"})
+      headers = Enum.reject(McpFixtures.headers_for(body), fn {k, _} -> k == "mcp-name" end)
+
+      resp =
+        conn
+        |> put_headers(headers)
+        |> post(~p"/mcp", Jason.encode!(body))
+
+      response = json_response(resp, 400)
+      assert response["error"]["code"] == -32020
+      assert response["error"]["message"] =~ "mcp-name"
+
+      assert {:ok, []} = Requests.list_requests()
+    end
+
+    test "an unsupported protocol version is refused 400/-32022 naming what is requested and supported",
+         %{conn: conn} do
+      body = raw_request("unsupported-version-1", "server/discover", "2024-11-05")
+
+      resp =
+        conn
+        |> put_headers(McpFixtures.headers_for(body))
+        |> post(~p"/mcp", Jason.encode!(body))
+
+      response = json_response(resp, 400)
+      assert response["error"]["code"] == -32022
+      assert response["error"]["data"]["requested"] == "2024-11-05"
+      assert response["error"]["data"]["supported"] == ["2026-07-28"]
+    end
+
+    test "an unimplemented JSON-RPC method is refused 404/-32601 (never 400 or 405)", %{conn: conn} do
+      body = raw_request("unknown-method-1", "prompts/list", "2026-07-28")
+
+      resp =
+        conn
+        |> put_headers(McpFixtures.headers_for(body))
+        |> post(~p"/mcp", Jason.encode!(body))
+
+      response = json_response(resp, 404)
+      assert response["error"]["code"] == -32601
+    end
+
+    test "a tools/call naming an unregistered tool is refused 400/-32602", %{conn: conn} do
+      body = McpFixtures.call_tool_request("unregistered-tool-1", "not-a-real-tool", %{})
+      resp = post_mcp(conn, body)
+
+      response = json_response(resp, 400)
+      assert response["error"]["code"] == -32602
+
+      assert {:ok, []} = Requests.list_requests()
+    end
+  end
+
+  describe "statelessness — an older client's session/stream headers change nothing" do
+    test "a session-id and last-event-id header produce the identical response, and no session-id header comes back",
+         %{conn: conn} do
+      body = McpFixtures.discover_request("stateless-1")
+
+      bare_resp = post_mcp(conn, body)
+      bare_body = json_response(bare_resp, 200)
+
+      stateful_resp =
+        conn
+        |> put_headers(McpFixtures.headers_for(body))
+        |> put_req_header("mcp-session-id", "a-session-id-from-an-older-client")
+        |> put_req_header("last-event-id", "42")
+        |> post(~p"/mcp", Jason.encode!(body))
+
+      stateful_body = json_response(stateful_resp, 200)
+
+      assert bare_body == stateful_body
+      assert get_resp_header(bare_resp, "mcp-session-id") == []
+      assert get_resp_header(stateful_resp, "mcp-session-id") == []
+    end
+  end
+
+  defp raw_request(id, method, protocol_version) do
+    %{
+      "jsonrpc" => "2.0",
+      "id" => id,
+      "method" => method,
+      "params" => %{
+        "_meta" => %{
+          "io.modelcontextprotocol/protocolVersion" => protocol_version,
+          "io.modelcontextprotocol/clientCapabilities" => %{}
+        }
+      }
+    }
   end
 
   defp post_mcp(conn, body) do
