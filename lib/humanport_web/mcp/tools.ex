@@ -12,9 +12,10 @@ defmodule HumanportWeb.MCP.Tools do
 
   alias HumanportWeb.MCP.Tools.Approve
   alias HumanportWeb.MCP.Tools.Ask
+  alias HumanportWeb.MCP.Tools.Await
   alias HumanportWeb.MCP.Tools.Check
 
-  @tools [Ask, Check, Approve]
+  @tools [Ask, Check, Approve, Await]
 
   @doc "The ordered list of tool modules — what a `tools/list` result enumerates."
   def all, do: @tools
@@ -27,4 +28,16 @@ defmodule HumanportWeb.MCP.Tools do
   end
 
   def fetch(_name), do: :error
+
+  @doc """
+  02.1-03-PLAN.md Task 3 — whether `module` answers a `tools/call` with a
+  deferred SSE response stream (`HumanportWeb.MCP.Tool`'s optional
+  `streams?/0`/`stream/3` callbacks) rather than the ordinary immediate
+  JSON path. `false` for a module that does not implement `streams?/0` at
+  all — most tools never need to, and `function_exported?/3` (not a bare
+  call) is what makes that safe rather than an `UndefinedFunctionError`.
+  """
+  def streaming?(module) do
+    function_exported?(module, :streams?, 0) and module.streams?()
+  end
 end

@@ -119,6 +119,7 @@ ones that matter for your situation.
 | `HUMANPORT_CF_ACCESS_TEAM_DOMAIN` | `config/runtime.exs` | unset or blank — `Resolvers.Env`, `verified? false` | The Cloudflare Access team name (just the name, not a URL — the application derives both the JWKS URL and the expected issuer from this one value, so the two can never disagree). Setting this to a **non-blank** value swaps the actor resolver to `Resolvers.CloudflareAccess` and makes `HUMANPORT_CF_ACCESS_AUD` required. Blank counts as unset, because `compose.yaml` declares this variable as `${VAR:-}` — the only Compose form that reads a value out of `--env-file` — and that renders as an empty string whenever nothing is configured. **Read the paragraph below before setting this.** |
 | `HUMANPORT_CF_ACCESS_AUD` | `config/runtime.exs` | required if the team domain is set; unused otherwise | The AUD tag of THIS instance's own Cloudflare Access application, copied from its dashboard. Without it, a token minted for any other Access application in the same Cloudflare account would be accepted — the application refuses to start with a team domain set and no AUD tag, rather than starting half-configured. |
 | `HUMANPORT_MCP_ALLOWED_ORIGINS` | `config/runtime.exs` | unset — every browser-originated `/mcp` request is refused | A comma-separated list of `Origin` values allowed to reach `POST /mcp`. Only relevant to a browser-based caller; a non-browser agent runtime never sends an `Origin` header at all, so this never affects it either way. See [The MCP endpoint](#the-mcp-endpoint) below. |
+| `HUMANPORT_MCP_AWAIT_TIMEOUT_SECONDS` | `config/runtime.exs` | `50` | The ceiling on the MCP `await` tool's own wait, in seconds — independent of (but defaulting to match) `HUMANPORT_LONG_POLL_MAX_WAIT_SECONDS` above. See [The MCP endpoint](#the-mcp-endpoint) below for what `await` actually does with this. |
 
 ### Setting `HUMANPORT_CF_ACCESS_TEAM_DOMAIN` changes what an unauthenticated request gets
 
@@ -172,9 +173,50 @@ trail from one created over `/api/v1` — there is one write path, not two.
   [Setting `HUMANPORT_CF_ACCESS_TEAM_DOMAIN`](#setting-humanport_cf_access_team_domain-changes-what-an-unauthenticated-request-gets)
   above. Without it, `/mcp` is exactly as unauthenticated as the rest of this
   version.
-- **One tool so far.** `tools/list` currently returns exactly one tool, `ask`
-  — the other interactions this project's roadmap describes (`approve`,
-  `choose`, `check`, `await`) are later work, not yet reachable here.
+- **Four tools so far.** `tools/list` currently returns `ask` (creates a
+  free-text request), `approve` (creates an approval request — it asks a
+  human to approve or reject; it does NOT itself decide anything), `check`
+  (an immediate, non-waiting glance at a request's current state) and
+  `await` (see below). `choose` is later work, not yet reachable here.
+- **`check` and `await` are the same primitive's two branches.** `check`
+  reads and returns immediately, whatever the request's state. `await`
+  holds the connection open until the request is answered or its own
+  ceiling elapses (`HUMANPORT_MCP_AWAIT_TIMEOUT_SECONDS` above, defaulting
+  to match `HUMANPORT_LONG_POLL_MAX_WAIT_SECONDS`). Both render the
+  identical result shape — the created/read request's own wire
+  representation, plus a small `_meta` object (`app.humanport/wait`)
+  carrying `waited_ms` (how long THIS call itself waited — always `0` for
+  `check`) and `pending_for_ms` (how long the request has been pending, or
+  was pending before it was answered).
+- **`await` answers as a Server-Sent Events stream, not a silently blocking
+  POST.** The `Content-Type` is `text/event-stream`, with an
+  `X-Accel-Buffering: no` header telling any reverse proxy in front of this
+  instance not to buffer the response — buffering would defeat the whole
+  point, delivering nothing to the client until the proxy's own buffer
+  flushes or the connection ends. While the request stays pending, the
+  stream carries periodic blank SSE comment lines (a bare `:` per line) as
+  a keep-alive — this is what lets `await` hold a connection open longer
+  than an idle intermediary would otherwise tolerate; the cadence is
+  configured internally and is not operator-tunable in this version. When
+  the request is answered, or when `await`'s own ceiling elapses with no
+  answer, the stream carries exactly one final JSON-RPC response and then
+  closes. A window that closes with no answer is an ORDINARY result
+  (`waited_ms`/`pending_for_ms` and the request's still-pending state) —
+  never an error, and never a JSON-RPC error response either way; that
+  split is reserved for genuine protocol faults (unknown method, header
+  mismatch), never for "nobody has answered yet."
+- **Closing the connection cancels the wait.** This protocol revision has
+  no client-to-server cancellation message; the client closing its end of
+  an `await` connection is itself the cancellation signal, and this
+  instance stops working on that wait as soon as it notices — no further
+  bytes are written for a closed connection. Two `await` calls on the same
+  request are independent of each other: closing one never affects the
+  other.
+- **If you put a reverse proxy in front of this instance,** it must not
+  buffer `await`'s response and must not impose an idle/response timeout
+  shorter than `HUMANPORT_MCP_AWAIT_TIMEOUT_SECONDS`. The `X-Accel-Buffering:
+  no` header is this instance's own request not to buffer; whether your
+  proxy honours it depends on the proxy.
 
 ## Health, readiness, and what a sustained "unhealthy" actually causes
 

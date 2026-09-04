@@ -74,7 +74,24 @@ defmodule HumanportWeb.RequestWaiting do
   @doc "The configured long-poll ceiling, in whole seconds (`HUMANPORT_LONG_POLL_MAX_WAIT_SECONDS`, D-01/D-02)."
   def max_wait, do: Application.get_env(:humanport, :long_poll_max_wait_seconds, 50)
 
-  defp deadline(wait), do: System.monotonic_time(:millisecond) + :timer.seconds(wait)
+  # `round/1`, not a bare `:timer.seconds(wait)` — 02.1-03-PLAN.md Task 3
+  # FINDING: `:timer.seconds/1` preserves its argument's type (an integer
+  # `wait`, the only kind the HTTP `?wait=N` surface and this module's own
+  # pre-Task-3 tests ever pass, yields an integer; but a FRACTIONAL `wait`
+  # yields a FLOAT, e.g. `:timer.seconds(0.2) == 200.0`), and Erlang's
+  # `receive ... after Timeout` REQUIRES Timeout to be a non-negative
+  # integer or `:infinity` — a float timeout raises `:timeout_value`.
+  # `HumanportWeb.MCP.Tools.Await`'s keep-alive loop (Task 3) needs genuine
+  # sub-second precision — its whole reason for reading the keep-alive
+  # interval from application config is so a test can set it to "a fraction
+  # of a second and stay honest" rather than waiting twenty-plus seconds to
+  # observe a closed socket — so this primitive must accept a fractional
+  # `wait` without crashing. `round/1` keeps every existing integer-`wait`
+  # caller byte-for-byte unchanged (`round(5000) == 5000`) while making a
+  # fractional `wait` (e.g. `0.2`) resolve to a genuine, receive-safe
+  # integer millisecond deadline (`round(200.0) == 200`) instead of a
+  # crash.
+  defp deadline(wait), do: System.monotonic_time(:millisecond) + round(:timer.seconds(wait))
 
   # Already terminal — return immediately regardless of the wait parameter.
   defp do_await(_id, _topic, %{state: state} = request, _wait, _deadline)

@@ -187,14 +187,7 @@ defmodule HumanportWeb.McpController do
     case Tools.fetch(name) do
       {:ok, tool_module} ->
         arguments = Map.get(rpc_params, "arguments", %{})
-
-        case tool_module.call(arguments, conn.assigns.actor) do
-          {:ok, result} ->
-            respond_result(conn, id, McpJSON.tool_result(result))
-
-          {:error, error} ->
-            respond_tool_error(conn, id, error)
-        end
+        dispatch_tool(conn, id, tool_module, arguments)
 
       # -32602 — InvalidParamsError. An unknown tool name is invalid
       # params, not an unknown method.
@@ -208,6 +201,30 @@ defmodule HumanportWeb.McpController do
   # host it at all; the spec is explicit about the distinction).
   defp dispatch(conn, id, _other_method, _rpc_params) do
     respond_error(conn, :not_found, -32601, "method not found", nil, id)
+  end
+
+  # 02.1-03-PLAN.md Task 3 — branch to the streaming entry point when the
+  # RESOLVED TOOL declares itself streaming (`Tools.streaming?/1`); no tool
+  # name is ever compared here, exactly as `Tools.fetch/1` already resolves
+  # `tools/call` dispatch by name lookup rather than a literal tool-name
+  # `case`. The JSON RPC envelope `id` travels via `conn.assigns` because
+  # `HumanportWeb.MCP.Tool.stream/3`'s signature is fixed at three
+  # arguments (conn, arguments, actor) — the streaming tool reads it back
+  # to build its own SSE response/error envelopes.
+  defp dispatch_tool(conn, id, tool_module, arguments) do
+    if Tools.streaming?(tool_module) do
+      conn
+      |> assign(:mcp_request_id, id)
+      |> tool_module.stream(arguments, conn.assigns.actor)
+    else
+      case tool_module.call(arguments, conn.assigns.actor) do
+        {:ok, result} ->
+          respond_result(conn, id, McpJSON.tool_result(result))
+
+        {:error, error} ->
+          respond_tool_error(conn, id, error)
+      end
+    end
   end
 
   # A domain refusal from Humanport.Requests (already decided, malformed
