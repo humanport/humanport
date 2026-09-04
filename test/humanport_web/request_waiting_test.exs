@@ -168,6 +168,22 @@ defmodule HumanportWeb.RequestWaitingTest do
     end
   end
 
+  describe "await/4 — fractional wait_seconds (02.1-03-PLAN.md Task 3 finding)" do
+    test "a sub-second wait does not crash — round/1, not a bare :timer.seconds/1" do
+      request = request_fixture(%{type: :ask, title: "Fractional wait"})
+      topic = RequestWaiting.topic(request.id)
+      HumanportWeb.Endpoint.subscribe(topic)
+
+      started_at = System.monotonic_time(:millisecond)
+      assert {:ok, result} = RequestWaiting.await(request.id, topic, request, 0.2)
+      elapsed_ms = System.monotonic_time(:millisecond) - started_at
+
+      assert result.state == :pending
+      assert elapsed_ms >= 200
+      assert elapsed_ms < 2_000
+    end
+  end
+
   describe "HumanportWeb.MCP.Timeouts.verify!/0" do
     alias HumanportWeb.MCP.Timeouts
 

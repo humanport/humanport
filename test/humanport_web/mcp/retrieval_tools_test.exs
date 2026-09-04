@@ -139,8 +139,10 @@ defmodule HumanportWeb.MCP.RetrievalToolsTest do
     end
   end
 
-  describe "tools/list — exactly three entries" do
-    test "returns ask, check and approve, and validates against ListToolsResult", %{conn: conn} do
+  describe "tools/list — exactly four entries" do
+    test "returns ask, check, approve and await, and validates against ListToolsResult", %{
+      conn: conn
+    } do
       body = McpFixtures.list_tools_request("list-1")
       resp = post_mcp(conn, body)
 
@@ -148,10 +150,123 @@ defmodule HumanportWeb.MCP.RetrievalToolsTest do
       McpSchema.assert_valid!(response["result"], "ListToolsResult")
 
       names = Enum.map(response["result"]["tools"], & &1["name"])
-      assert length(names) == 3
+      assert length(names) == 4
       assert "ask" in names
       assert "check" in names
       assert "approve" in names
+      assert "await" in names
+    end
+  end
+
+  describe "await — connection-level behaviour a stub adapter can observe honestly" do
+    test "on an already-terminal request, answers as plain JSON with waited_ms 0 — no stream opened",
+         %{conn: conn} do
+      {:ok, request} = Requests.submit(%{type: :ask, title: "Already answered"}, default_actor())
+      {:ok, _} = Requests.answer(request, "done", default_actor())
+
+      body = McpFixtures.call_tool_request("await-1", "await", %{"id" => request.id})
+      resp = post_mcp(conn, body)
+
+      assert get_resp_header(resp, "content-type") == ["application/json; charset=utf-8"]
+      response = json_response(resp, 200)
+      McpSchema.assert_valid!(response["result"], "CallToolResult")
+
+      assert response["result"]["isError"] == false
+      assert response["result"]["_meta"]["app.humanport/wait"]["waited_ms"] == 0
+      assert response["result"]["structuredContent"]["status"] == "completed"
+    end
+
+    test "naming a missing id returns a tool-originated error as plain JSON — no stream opened",
+         %{conn: conn} do
+      missing_id = Ecto.UUID.generate()
+      body = McpFixtures.call_tool_request("await-2", "await", %{"id" => missing_id})
+      resp = post_mcp(conn, body)
+
+      assert get_resp_header(resp, "content-type") == ["application/json; charset=utf-8"]
+      response = json_response(resp, 200)
+
+      refute Map.has_key?(response, "error")
+      assert response["result"]["isError"] == true
+      assert [%{"type" => "text", "text" => text}] = response["result"]["content"]
+      assert text =~ "not found"
+    end
+
+    test "on a pending request, opens an event-stream response with the no-buffering header",
+         %{conn: conn} do
+      {:ok, request} = Requests.submit(%{type: :ask, title: "Nobody answers"}, default_actor())
+
+      body =
+        McpFixtures.call_tool_request("await-3", "await", %{
+          "id" => request.id,
+          "wait_seconds" => 1
+        })
+
+      resp = post_mcp(conn, body)
+
+      assert resp.status == 200
+      assert get_resp_header(resp, "content-type") == ["text/event-stream"]
+      assert get_resp_header(resp, "x-accel-buffering") == ["no"]
+      assert get_resp_header(resp, "mcp-session-id") == []
+
+      raw = response(resp, 200)
+      assert String.contains?(raw, ":\r\n") or raw =~ ~r/data: /
+    end
+
+    test "a window that closes with no answer terminates the stream with a pending CallToolResult, isError false",
+         %{conn: conn} do
+      {:ok, request} =
+        Requests.submit(%{type: :ask, title: "Nobody answers, ever"}, default_actor())
+
+      body =
+        McpFixtures.call_tool_request("await-4", "await", %{
+          "id" => request.id,
+          "wait_seconds" => 1
+        })
+
+      resp = post_mcp(conn, body)
+      raw = response(resp, 200)
+
+      [_, json_str] = Regex.run(~r/data: (.+)\n\n\z/s, raw)
+      payload = Jason.decode!(json_str)
+
+      McpSchema.assert_valid!(payload["result"], "CallToolResult")
+      assert payload["id"] == "await-4"
+      refute Regex.match?(~r/^id: /m, raw)
+      assert payload["result"]["isError"] == false
+      assert payload["result"]["structuredContent"]["status"] == "pending"
+      assert payload["result"]["_meta"]["app.humanport/wait"]["waited_ms"] > 0
+    end
+
+    test "answered mid-wait, the stream's final event carries the answer and waited_ms > 0",
+         %{conn: conn} do
+      {:ok, request} = Requests.submit(%{type: :ask, title: "Answered mid-wait"}, default_actor())
+
+      body =
+        McpFixtures.call_tool_request("await-5", "await", %{
+          "id" => request.id,
+          "wait_seconds" => 10
+        })
+
+      wait_task =
+        Task.async(fn ->
+          conn
+          |> put_headers(McpFixtures.headers_for(body))
+          |> post(~p"/mcp", Jason.encode!(body))
+        end)
+
+      Process.sleep(150)
+      {:ok, _} = Requests.answer(request, "the real answer", default_actor())
+
+      resp = Task.await(wait_task, 5_000)
+      raw = response(resp, 200)
+
+      [_, json_str] = Regex.run(~r/data: (.+)\n\n\z/s, raw)
+      payload = Jason.decode!(json_str)
+
+      McpSchema.assert_valid!(payload["result"], "CallToolResult")
+      assert payload["result"]["structuredContent"]["status"] == "completed"
+      assert payload["result"]["structuredContent"]["result"]["answer"] == "the real answer"
+      assert payload["result"]["_meta"]["app.humanport/wait"]["waited_ms"] > 0
     end
   end
 
