@@ -30,6 +30,7 @@ defmodule HumanportWeb.McpController do
 
   use HumanportWeb, :controller
 
+  alias HumanportWeb.AshErrorMapper
   alias HumanportWeb.MCP.Tools
   alias HumanportWeb.McpJSON
 
@@ -208,16 +209,19 @@ defmodule HumanportWeb.McpController do
     respond_error(conn, :not_found, -32601, "method not found", nil, id)
   end
 
-  # Task 1's minimal mapping — 02.1-02-PLAN.md Task 2 replaces this with
-  # the full not-found/already-decided/malformed split reused from
-  # HumanportWeb.FallbackController.
+  # A domain refusal from Humanport.Requests (already decided, malformed
+  # argument) is a TOOL-originated error, not a JSON-RPC error response —
+  # the spec's own rule (`CallToolResult.isError`'s description): errors in
+  # *finding* a tool, or in the protocol envelope, are JSON-RPC error
+  # responses; errors that originate inside a tool are reported inside a
+  # successful result with the error flag set, so the model can see them
+  # and self-correct rather than seeing a transport failure. Reuses
+  # HumanportWeb.AshErrorMapper — the exact same classifier
+  # HumanportWeb.FallbackController uses for the HTTP surface — so the
+  # message an agent reads here matches what a human reads over HTTP for
+  # the identical condition, and there is one taxonomy, not two.
   defp respond_tool_error(conn, id, error) do
-    message =
-      if is_exception(error) do
-        Exception.message(error)
-      else
-        inspect(error)
-      end
+    {_kind, message} = AshErrorMapper.classify(error)
 
     respond_result(
       conn,

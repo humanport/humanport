@@ -187,9 +187,10 @@ defmodule HumanportWeb.McpControllerTest do
   end
 
   describe "the refusal taxonomy — protocol-level errors" do
-    test "a protocol-version header that disagrees with the body's _meta is refused 400/-32020", %{
-      conn: conn
-    } do
+    test "a protocol-version header that disagrees with the body's _meta is refused 400/-32020",
+         %{
+           conn: conn
+         } do
       body = McpFixtures.discover_request("mismatch-1")
 
       resp =
@@ -248,7 +249,9 @@ defmodule HumanportWeb.McpControllerTest do
       assert response["error"]["data"]["supported"] == ["2026-07-28"]
     end
 
-    test "an unimplemented JSON-RPC method is refused 404/-32601 (never 400 or 405)", %{conn: conn} do
+    test "an unimplemented JSON-RPC method is refused 404/-32601 (never 400 or 405)", %{
+      conn: conn
+    } do
       body = raw_request("unknown-method-1", "prompts/list", "2026-07-28")
 
       resp =

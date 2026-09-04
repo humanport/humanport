@@ -38,7 +38,8 @@ defmodule HumanportWeb.AshErrorMapperTest do
     end
 
     test "a type/action mismatch classifies as :invalid, never :conflict or :not_found" do
-      assert {:error, error} = Requests.answer(%HumanRequest{type: :approve}, "x", default_actor())
+      assert {:error, error} =
+               Requests.answer(%HumanRequest{type: :approve}, "x", default_actor())
 
       assert {:invalid, message} = AshErrorMapper.classify(error)
       assert message =~ "cannot be answered"
