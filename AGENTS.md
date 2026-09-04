@@ -89,6 +89,39 @@ system, and `<.icon>` / `<.field>` come from Petal, not from `core_components.ex
   out of `mix.lock`; `tesla` is accepted here as an unavoidable transitive
   dependency, not a violation of the rule above.
 
+### Phase 2.1 additions — the MCP surface is hand-written
+
+- `POST /mcp` (`HumanportWeb.McpController`) implements MCP protocol revision
+  `2026-07-28` by hand — no `hermes_mcp`/`anubis_mcp`/`ex_mcp` dependency
+  (`02.1-CONTEXT.md` D-08). That decision makes spec-tracking a permanent
+  local cost: this codebase's own contract tests are what "follows the
+  official spec" rests on, not a library's guarantee.
+- Every contract test for the MCP surface validates against the vendored,
+  digest-pinned official JSON Schema at `priv/mcp/schema-2026-07-28.json`
+  (`Humanport.McpSchema`, `test/support/mcp_schema.ex`) — never against a
+  hand-written expectation of what the schema says. When modifying
+  `lib/humanport_web/controllers/mcp_controller.ex`,
+  `lib/humanport_web/controllers/mcp_json.ex`, or any module under
+  `lib/humanport_web/mcp/`, add or extend a contract test that asserts the
+  wire payload against the vendored schema's own definitions.
+- A spec revision means replacing `priv/mcp/schema-2026-07-28.json` (renamed
+  for the new revision) and recomputing `priv/mcp/SHA256SUMS` in the SAME
+  commit — see `priv/mcp/README.md`'s "Refreshing this file" section. Never
+  hand-edit the vendored schema.
+- Every MCP tool handler (`lib/humanport_web/mcp/tools/*.ex`) calls a
+  `Humanport.Requests` domain function — never builds an `Ash.Changeset` or
+  calls `Ash.create`/`Ash.update` directly. This is what keeps a request
+  created over MCP indistinguishable from one created over `/api/v1`
+  (PROTO-09) by construction, not by later inspection.
+- Domain errors from a tool's own `Humanport.Requests` call are reported
+  inside a successful `CallToolResult` (`isError: true`), never as a
+  JSON-RPC error response — see the spec's own rule that a tool-internal
+  error belongs in the result so the calling model can see it and
+  self-correct. Protocol-envelope errors (bad headers, unsupported version,
+  unknown method) are JSON-RPC error responses. Both paths share one
+  classifier, `HumanportWeb.AshErrorMapper` — extend it, do not add a second
+  copy of its `match?` clauses anywhere.
+
 ### Two gaps `usage_rules.sync` cannot close
 
 - `petal_components` ships its usage rules as `rules.md`, not `usage-rules.md`, so the

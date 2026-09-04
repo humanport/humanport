@@ -118,6 +118,7 @@ ones that matter for your situation.
 | `POOL_SIZE` | `config/runtime.exs` | `10` | The Ecto connection pool size. |
 | `HUMANPORT_CF_ACCESS_TEAM_DOMAIN` | `config/runtime.exs` | unset or blank — `Resolvers.Env`, `verified? false` | The Cloudflare Access team name (just the name, not a URL — the application derives both the JWKS URL and the expected issuer from this one value, so the two can never disagree). Setting this to a **non-blank** value swaps the actor resolver to `Resolvers.CloudflareAccess` and makes `HUMANPORT_CF_ACCESS_AUD` required. Blank counts as unset, because `compose.yaml` declares this variable as `${VAR:-}` — the only Compose form that reads a value out of `--env-file` — and that renders as an empty string whenever nothing is configured. **Read the paragraph below before setting this.** |
 | `HUMANPORT_CF_ACCESS_AUD` | `config/runtime.exs` | required if the team domain is set; unused otherwise | The AUD tag of THIS instance's own Cloudflare Access application, copied from its dashboard. Without it, a token minted for any other Access application in the same Cloudflare account would be accepted — the application refuses to start with a team domain set and no AUD tag, rather than starting half-configured. |
+| `HUMANPORT_MCP_ALLOWED_ORIGINS` | `config/runtime.exs` | unset — every browser-originated `/mcp` request is refused | A comma-separated list of `Origin` values allowed to reach `POST /mcp`. Only relevant to a browser-based caller; a non-browser agent runtime never sends an `Origin` header at all, so this never affects it either way. See [The MCP endpoint](#the-mcp-endpoint) below. |
 
 ### Setting `HUMANPORT_CF_ACCESS_TEAM_DOMAIN` changes what an unauthenticated request gets
 
@@ -137,6 +138,43 @@ boot, with nothing else to undo.
 The `db` service's own credentials (`POSTGRES_USER`, `POSTGRES_PASSWORD`,
 `POSTGRES_DB`) are fixed in `compose.yaml` and match `DATABASE_URL`'s default —
 change them together if you change either.
+
+## The MCP endpoint
+
+`POST /mcp` is the same product as `POST /api/v1/requests` and its two
+siblings, reached from an agent runtime instead of a plain HTTP client. A
+request created through it is written through the identical
+`Humanport.Requests.submit/2` domain function the HTTP controller calls, and
+is indistinguishable afterwards in the inbox, in storage, and in the audit
+trail from one created over `/api/v1` — there is one write path, not two.
+
+- **One method, one path.** `POST` is the only method this endpoint answers.
+  `GET` and `DELETE` both return `405` — this revision of the protocol
+  (`2026-07-28`) defines no meaning for either on this endpoint: no
+  standalone event stream, no session-delete verb.
+- **Required headers.** Every request carries `MCP-Protocol-Version`,
+  `Mcp-Method`, and — for a `tools/call` — `Mcp-Name`, each mirroring a value
+  already present in the JSON-RPC body. A disagreement between a header and
+  the body is refused `400`; this is the transport-level integrity check the
+  spec requires, not an authentication mechanism.
+- **`server/discover` advertises `2026-07-28` only.** No `initialize`
+  handshake exists in this revision, and none is implemented here. A request
+  naming a protocol version this instance does not support is refused `400`
+  with the versions it does support.
+- **No session state.** This revision removed protocol-level MCP sessions
+  entirely: this endpoint mints no session id, echoes none back, and ignores
+  one if an older client sends it. It is stateless in the same sense the rest
+  of this application is — see [Limits of this version](#limits-of-this-version)
+  for what that does and does not mean for `PROTO-04`-style multi-node
+  retrieval, which this version does not implement.
+- **No authentication of its own.** `/mcp` depends on exactly the same
+  Cloudflare Access gate `/api/v1` does — see
+  [Setting `HUMANPORT_CF_ACCESS_TEAM_DOMAIN`](#setting-humanport_cf_access_team_domain-changes-what-an-unauthenticated-request-gets)
+  above. Without it, `/mcp` is exactly as unauthenticated as the rest of this
+  version.
+- **One tool so far.** `tools/list` currently returns exactly one tool, `ask`
+  — the other interactions this project's roadmap describes (`approve`,
+  `choose`, `check`, `await`) are later work, not yet reachable here.
 
 ## Health, readiness, and what a sustained "unhealthy" actually causes
 
