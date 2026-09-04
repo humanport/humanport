@@ -126,8 +126,8 @@ defmodule HumanportWeb.RequestControllerTest do
   end
 
   describe "D-06 — creating an unimplemented type is refused at create, never left pending forever" do
-    test "creating a choose or an escalate request returns 422 naming the type", %{conn: conn} do
-      for type <- ["choose", "escalate"] do
+    test "creating an escalate request returns 422 naming the type", %{conn: conn} do
+      for type <- ["escalate"] do
         resp_conn =
           post(conn, ~p"/api/v1/requests", %{"type" => type, "title" => "Not built yet"})
 

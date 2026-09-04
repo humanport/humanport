@@ -147,7 +147,9 @@ defmodule Humanport.Requests.HumanRequest do
 
     create :submit do
       # `tenant_id` is NEVER accepted from the wire (D-05) — it is set below
-      # from application config, not by the caller.
+      # from application config, not by the caller. `selected_option_ids` is
+      # NEVER accepted here either (CORE-04) — a request may not arrive
+      # already answered.
       accept [
         :type,
         :title,
@@ -158,14 +160,30 @@ defmodule Humanport.Requests.HumanRequest do
         :external_correlation,
         :requester_label,
         :risk,
-        :reversible
+        :reversible,
+        :options,
+        :allow_free_text,
+        :max_selections
       ]
 
-      # D-06 — the enum carries all four §6.2 values, only `ask` and `approve`
-      # are implemented. An unimplemented type must never look like a working
-      # one: this is an explicit, boundary-mapped rejection, not silence.
-      validate one_of(:type, [:ask, :approve]),
+      # D-12 — the presence of options makes a request a choice. Declared
+      # BEFORE the `one_of` validation below so that validation sees the
+      # derived type, not the caller's raw (possibly absent, possibly `ask`)
+      # value.
+      change {Humanport.Requests.Changes.DeriveChooseType, []}
+
+      # D-06 — the enum carries all four §6.2 values; `ask`, `approve` and
+      # now `choose` (CORE-04) are implemented — `escalate` remains the one
+      # genuinely unimplemented type. An unimplemented type must never look
+      # like a working one: this is an explicit, boundary-mapped rejection,
+      # not silence.
+      validate one_of(:type, [:ask, :approve, :choose]),
         message: "request type is not implemented in this version"
+
+      # CORE-04 — the converse of `DeriveChooseType`: a choose request with
+      # no options (or an empty list) is refused, because it could never
+      # reach a terminal state.
+      validate {Humanport.Requests.Validations.ChooseRequiresOptions, []}
 
       change set_attribute(:requester_verified, false)
       change {Humanport.Requests.Changes.SetTenantId, []}
@@ -233,7 +251,9 @@ defmodule Humanport.Requests.HumanRequest do
     attribute :tenant_id, :uuid, allow_nil?: false, public?: true
 
     # D-06 — all four §6.2 values live in the enum now so Phase 5 needs no
-    # `ALTER TYPE`; only :ask and :approve are implemented (validated above).
+    # `ALTER TYPE`; `ask`, `approve` and `choose` (CORE-04) are implemented
+    # (validated above) — `escalate` remains the one genuinely unimplemented
+    # type.
     attribute :type, :atom,
       constraints: [one_of: [:ask, :choose, :approve, :escalate]],
       allow_nil?: false,
@@ -247,6 +267,24 @@ defmodule Humanport.Requests.HumanRequest do
 
     # D-08 — the narrow embedded subject: type + id + label.
     attribute :subject, Humanport.Requests.Subject, public?: true
+
+    # CORE-04, locked decision 1/2 — the opaque, caller-supplied option
+    # list. Absent or empty, a request behaves exactly as `ask`/`approve`
+    # does today; present, `DeriveChooseType` (above) makes it a choice.
+    # Stored and returned unchanged — see `Humanport.Requests.Option`.
+    attribute :options, {:array, Humanport.Requests.Option}, public?: true
+
+    # CORE-04, locked decision 4 — free text alongside options is opt-in.
+    attribute :allow_free_text, :boolean, default: false, allow_nil?: false, public?: true
+
+    # CORE-04, locked decision 3 — the interface allows a single selection
+    # by default and this enforces it, while the *result* stays a list
+    # regardless of this value.
+    attribute :max_selections, :integer,
+      default: 1,
+      allow_nil?: false,
+      constraints: [min: 1],
+      public?: true
 
     # D-04, §6.1 — the agent's own optional correlation value, carried
     # through unchanged under the canonical field name.
@@ -264,6 +302,12 @@ defmodule Humanport.Requests.HumanRequest do
 
     attribute :answer, :string, public?: true
     attribute :decision, :atom, constraints: [one_of: [:approved, :rejected]], public?: true
+
+    # CORE-04 — set only by the `:choose` update action, never accepted by
+    # `:submit` (a request may not arrive already answered). A list even
+    # for a single selection (locked decision 3) — a scalar never appears
+    # in storage or on the wire.
+    attribute :selected_option_ids, {:array, :string}, public?: true
     # D-11 — an actor snapshot (see Humanport.Requests.Changes.SetDecidedBy),
     # not a foreign key: who answered must stay legible even if the acting
     # actor's own record later changes.

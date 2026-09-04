@@ -143,8 +143,8 @@ defmodule Humanport.Requests.DecideTest do
   end
 
   describe "D-06 — an unimplemented type must never look like a working one" do
-    test "creating a choose or an escalate request fails with the not-implemented message and writes no row, no audit event" do
-      for type <- [:choose, :escalate] do
+    test "creating an escalate request fails with the not-implemented message and writes no row, no audit event" do
+      for type <- [:escalate] do
         distinguishing_title = "not-implemented-#{type}-#{System.unique_integer([:positive])}"
 
         requests_before = Repo.aggregate(from(r in "human_requests"), :count)

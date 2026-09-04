@@ -124,10 +124,10 @@ defmodule HumanportWeb.DogfoodingLoopTest do
     end
   end
 
-  test "creating a choose or an escalate request fails explicitly as not-implemented", %{
+  test "creating an escalate request fails explicitly as not-implemented", %{
     conn: conn
   } do
-    for type <- ["choose", "escalate"] do
+    for type <- ["escalate"] do
       resp_conn = post(conn, ~p"/api/v1/requests", %{"type" => type, "title" => "Not built yet"})
       body = json_response(resp_conn, 422)
       assert body["error"]["code"] == "not_implemented"
