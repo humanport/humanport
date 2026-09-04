@@ -113,6 +113,16 @@ config :humanport,
       blank_to_nil.(System.get_env("HUMANPORT_LONG_POLL_MAX_WAIT_SECONDS")) || "50"
     )
 
+# D-09c (02.1-CONTEXT.md) — the /mcp Origin allowlist (McpTransportGuard).
+# Blank-safe for the same `${VAR:-}` reason as every other compose.yaml-
+# declared variable above: an unset or blank HUMANPORT_MCP_ALLOWED_ORIGINS
+# must leave the compile-time empty-list default in place, never become a
+# list containing one empty string.
+if origins = blank_to_nil.(System.get_env("HUMANPORT_MCP_ALLOWED_ORIGINS")) do
+  config :humanport,
+    mcp_allowed_origins: origins |> String.split(",") |> Enum.map(&String.trim/1)
+end
+
 if config_env() == :dev do
   # Reload browser tabs when matching files change.
   config :humanport, HumanportWeb.Endpoint,

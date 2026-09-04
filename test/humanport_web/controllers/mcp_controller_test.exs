@@ -51,7 +51,9 @@ defmodule HumanportWeb.McpControllerTest do
 
   describe "tools/call ask — the tracer" do
     test "creates exactly one HumanRequest through Requests.submit/2", %{conn: conn} do
-      body = McpFixtures.call_tool_request("call-1", "ask", %{"title" => "Which changelog entry?"})
+      body =
+        McpFixtures.call_tool_request("call-1", "ask", %{"title" => "Which changelog entry?"})
+
       resp = post_mcp(conn, body)
 
       response = json_response(resp, 200)
