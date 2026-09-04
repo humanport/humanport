@@ -67,12 +67,15 @@ defmodule HumanportWeb.McpJSON do
 
   @doc """
   The `tools/call` `CallToolResult`. `attrs` carries `:content` (required),
-  and optionally `:structured_content` and `:is_error`.
+  and optionally `:structured_content`, `:is_error` and `:meta` (the
+  result's own `_meta` object — 02.1-03-PLAN.md's `check`/`await` carry
+  `app.humanport/wait` here, two integers and nothing else).
   """
   def tool_result(attrs) do
     %{"content" => Map.fetch!(attrs, :content), "resultType" => @result_type}
     |> maybe_put("isError", Map.get(attrs, :is_error))
     |> maybe_put("structuredContent", Map.get(attrs, :structured_content))
+    |> maybe_put("_meta", Map.get(attrs, :meta))
   end
 
   defp supported_versions, do: Application.get_env(:humanport, :mcp_supported_versions, [])

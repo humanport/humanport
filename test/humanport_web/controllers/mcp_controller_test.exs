@@ -43,14 +43,19 @@ defmodule HumanportWeb.McpControllerTest do
   end
 
   describe "tools/list" do
-    test "returns 200 with exactly one tool named ask", %{conn: conn} do
+    # 02.1-03-PLAN.md Task 2 registered `check` and `approve` alongside
+    # `ask` (test/humanport_web/mcp/retrieval_tools_test.exs covers their
+    # own definitions in full) — this test only needs to keep proving `ask`
+    # is still IN the list, not that it is the only entry.
+    test "returns 200 with ask among the registered tools", %{conn: conn} do
       body = McpFixtures.list_tools_request("list-1")
       resp = post_mcp(conn, body)
 
       response = json_response(resp, 200)
       McpSchema.assert_valid!(response["result"], "ListToolsResult")
 
-      assert [%{"name" => "ask"}] = response["result"]["tools"]
+      names = Enum.map(response["result"]["tools"], & &1["name"])
+      assert "ask" in names
       assert response["result"]["resultType"] == "complete"
     end
   end

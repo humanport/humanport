@@ -10,9 +10,11 @@ defmodule HumanportWeb.MCP.Tools do
   the MCP surface needs to know the full list.
   """
 
+  alias HumanportWeb.MCP.Tools.Approve
   alias HumanportWeb.MCP.Tools.Ask
+  alias HumanportWeb.MCP.Tools.Check
 
-  @tools [Ask]
+  @tools [Ask, Check, Approve]
 
   @doc "The ordered list of tool modules — what a `tools/list` result enumerates."
   def all, do: @tools
