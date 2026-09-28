@@ -135,6 +135,16 @@ if raw_await_timeout =
   config :humanport, mcp_await_timeout_ms: String.to_integer(raw_await_timeout) * 1_000
 end
 
+# SEC-04/05 — when set, /api/v1 and /mcp refuse any request that carries no
+# agent key (HumanportWeb.Plugs.AuthenticateAgent). Blank-safe for the same
+# `${VAR:-}` compose.yaml reason as every variable above; only "true" or "1"
+# switches it on, so a typo leaves the documented default in place rather
+# than half-enabling it.
+if require_agent_key = blank_to_nil.(System.get_env("HUMANPORT_REQUIRE_AGENT_KEY")) do
+  config :humanport,
+    require_agent_key: String.downcase(String.trim(require_agent_key)) in ~w(true 1)
+end
+
 if config_env() == :dev do
   # Reload browser tabs when matching files change.
   config :humanport, HumanportWeb.Endpoint,

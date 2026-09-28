@@ -16,7 +16,7 @@ set -eu
 cd -P -- "$(dirname -- "$0")/.."
 
 BASE_URL="http://localhost:4000"
-TOTAL=16
+TOTAL=17
 API="$BASE_URL/api/v1/requests"
 
 log() {
@@ -327,7 +327,39 @@ get_status=$(curl -sS -o /dev/null -w '%{http_code}' "$BASE_URL/mcp")
 [ "$get_status" = "405" ] || fail "step 15 — GET /mcp" "expected HTTP 405, got HTTP $get_status"
 
 # --------------------------------------------------------------- step 16 --
-log "Step 16/${TOTAL}: tear down"
+log "Step 16/${TOTAL}: an agent key makes the MCP requester verified, and cannot answer itself"
+issued=$(docker compose exec -T app bin/humanport rpc 'Humanport.Release.issue_agent_key("smoke-bot")' 2>&1) || \
+  fail "step 16 — issue an agent key" "$issued"
+AGENT_KEY=$(printf '%s\n' "$issued" | grep -o 'hp_[A-Za-z0-9_-]*' | head -n1)
+[ -n "$AGENT_KEY" ] || fail "step 16 — issue an agent key" "no token in: $issued"
+
+body=$(mcp_body tools/call ask '{"title":"Keyed question","requester_label":"claims-to-be-root"}')
+out=$(curl -sS -w '\n%{http_code}' -X POST "$BASE_URL/mcp" \
+  -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' \
+  -H "mcp-protocol-version: $MCP_VERSION" -H 'mcp-method: tools/call' -H 'mcp-name: ask' \
+  -H "authorization: Bearer $AGENT_KEY" -d "$body")
+status=$(printf '%s\n' "$out" | tail -n1)
+keyed_body=$(printf '%s\n' "$out" | sed '$d')
+assert_status "step 16 — keyed tools/call ask" 200 "$status" "$keyed_body"
+[ "$(printf '%s' "$keyed_body" | jq -r '.result.structuredContent.requester_verified')" = "true" ] || \
+  fail "step 16 — keyed request is verified" "got: $keyed_body"
+[ "$(printf '%s' "$keyed_body" | jq -r '.result.structuredContent.requester_label')" = "smoke-bot" ] || \
+  fail "step 16 — keyed request is named by its key" "got: $keyed_body"
+KEYED_ID=$(printf '%s' "$keyed_body" | jq -r '.result.structuredContent.id')
+
+self_status=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$BASE_URL/api/v1/requests/$KEYED_ID/respond" \
+  -H 'content-type: application/json' -H "authorization: Bearer $AGENT_KEY" -d '{"answer":"I approve of myself"}')
+[ "$self_status" = "403" ] || fail "step 16 — a key cannot answer its own request" "expected HTTP 403, got HTTP $self_status"
+
+bad_status=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$BASE_URL/api/v1/requests" \
+  -H 'content-type: application/json' -H 'authorization: Bearer hp_000000000000_nope' -d '{"type":"ask","title":"x"}')
+[ "$bad_status" = "401" ] || fail "step 16 — a bad key is refused" "expected HTTP 401, got HTTP $bad_status"
+
+out=$(http POST "/api/v1/requests/$KEYED_ID/respond" '{"answer":"A human answers instead."}')
+assert_status "step 16 — a human answers the keyed request" 200 "$(printf '%s\n' "$out" | head -n1)" "$out"
+
+# --------------------------------------------------------------- step 17 --
+log "Step 17/${TOTAL}: tear down"
 docker compose down -v --remove-orphans >/dev/null
 
 log "PASS — all ${TOTAL} steps green."

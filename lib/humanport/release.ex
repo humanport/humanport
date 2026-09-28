@@ -173,6 +173,70 @@ defmodule Humanport.Release do
     end
   end
 
+  @doc """
+  SEC-04/05 — issues an agent key labelled `label` and prints its token.
+  The token is shown exactly once; only its digest is stored. Run it on the
+  live node:
+
+      docker compose exec app bin/humanport rpc 'Humanport.Release.issue_agent_key("ci-bot")'
+
+  The issuance is audited with a `:system` actor labelled `"release-cli"`.
+  """
+  @spec issue_agent_key(String.t()) :: :ok
+  def issue_agent_key(label) when is_binary(label) do
+    case Humanport.Agents.issue_key(label, cli_actor()) do
+      {:ok, key, token} ->
+        IO.puts("""
+        Agent key issued.
+          label:  #{key.label}
+          id:     #{key.id}
+          token:  #{token}
+
+        This is the only time the token is shown. Send it as
+        Authorization: Bearer #{token}
+        """)
+
+      {:error, error} ->
+        raise "could not issue an agent key: #{Exception.message(error)}"
+    end
+  end
+
+  @doc """
+  SEC-04/05 — revokes the agent key with id `id`. Requests the key already
+  created keep their verified requester; the key itself is refused from the
+  next request on.
+  """
+  @spec revoke_agent_key(String.t()) :: :ok
+  def revoke_agent_key(id) when is_binary(id) do
+    with {:ok, key} <- Humanport.Agents.get_agent_key(id),
+         {:ok, revoked} <- Humanport.Agents.revoke_key(key, cli_actor()) do
+      IO.puts("Agent key #{revoked.id} (#{revoked.label}) revoked at #{revoked.revoked_at}.")
+    else
+      {:error, error} -> raise "could not revoke agent key #{id}: #{Exception.message(error)}"
+    end
+  end
+
+  @doc "SEC-04/05 — lists every agent key, active and revoked. Never prints a token."
+  @spec list_agent_keys() :: :ok
+  def list_agent_keys do
+    {:ok, keys} = Humanport.Agents.list_agent_keys()
+
+    Enum.each(keys, fn key ->
+      status = if key.revoked_at, do: "revoked #{key.revoked_at}", else: "active"
+      IO.puts("#{key.id}  hp_#{key.prefix}_…  #{status}  #{key.label}")
+    end)
+  end
+
+  defp cli_actor do
+    %Humanport.Actors.Actor{
+      id: nil,
+      type: :system,
+      label: "release-cli",
+      verified?: false,
+      method: nil
+    }
+  end
+
   defp db_reachable? do
     Ecto.Adapters.SQL.query(Humanport.Repo, "SELECT 1", [], timeout: 2_000)
     :ok

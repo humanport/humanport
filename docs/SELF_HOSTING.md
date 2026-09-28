@@ -31,8 +31,9 @@ response to an already-decided request is refused as a conflict, and answers a
 `choose` request with a selection. It then plays an agent over
 [the MCP endpoint](#the-mcp-endpoint): `server/discover`, `tools/list`, an
 `ask` whose `await` stream delivers the answer the moment a human gives it,
-`check`, and a `choose` and an `approve` round-trip. Then it tears everything
-down again. It is safe to re-run, and CI runs it on every push.
+`check`, and a `choose` and an `approve` round-trip. Last, it issues an
+[agent key](#agent-keys), confirms a keyed request is verified, and that the
+key cannot answer its own request. Then it tears everything down again. It is safe to re-run, and CI runs it on every push.
 
 ## The only required infrastructure dependency is PostgreSQL
 
@@ -97,7 +98,8 @@ Concretely, with nothing configured:
 - No tenancy boundary that is actually enforced at the access-control layer,
   even though the schema already carries a tenant column for later.
 - The requesting agent's name (`requester_label`) is whatever the agent sent,
-  recorded and rendered as unverified.
+  recorded and rendered as unverified — unless the agent presents an
+  [agent key](#agent-keys).
 
 Run it like that only on a machine you trust, on a network you trust, and
 treat "next to my other local services" as the threat model.
@@ -120,8 +122,9 @@ What the gate does **not** add:
   every request. Who gets through is decided entirely by your Access policy —
   keep it to the people and service tokens you intend.
 - Tenancy. There is still exactly one tenant.
-- A verified agent identity. The agent's `requester_label` is still
-  self-reported and still shown as unverified.
+- A verified agent identity. That is what [agent keys](#agent-keys) are
+  for; without one, the agent's `requester_label` is self-reported and shown
+  as unverified.
 - Protection for `/health` and `/ready`, which never pass through the gate —
   see [Health, readiness, and what a sustained "unhealthy" actually causes](#health-readiness-and-what-a-sustained-unhealthy-actually-causes).
 
@@ -144,6 +147,7 @@ ones that matter for your situation.
 | `HUMANPORT_CF_ACCESS_TEAM_DOMAIN` | `config/runtime.exs` | unset or blank — `Resolvers.Env`, `verified? false` | The Cloudflare Access team name (just the name, not a URL — the application derives both the JWKS URL and the expected issuer from this one value, so the two can never disagree). Setting this to a **non-blank** value swaps the actor resolver to `Resolvers.CloudflareAccess` and makes `HUMANPORT_CF_ACCESS_AUD` required. Blank counts as unset, because `compose.yaml` declares this variable as `${VAR:-}` — the only Compose form that reads a value out of `--env-file` — and that renders as an empty string whenever nothing is configured. **Read the paragraph below before setting this.** |
 | `HUMANPORT_CF_ACCESS_AUD` | `config/runtime.exs` | required if the team domain is set; unused otherwise | The AUD tag of THIS instance's own Cloudflare Access application, copied from its dashboard. Without it, a token minted for any other Access application in the same Cloudflare account would be accepted — the application refuses to start with a team domain set and no AUD tag, rather than starting half-configured. |
 | `HUMANPORT_MCP_ALLOWED_ORIGINS` | `config/runtime.exs` | unset — every browser-originated `/mcp` request is refused | A comma-separated list of `Origin` values allowed to reach `POST /mcp`. Only relevant to a browser-based caller; a non-browser agent runtime never sends an `Origin` header at all, so this never affects it either way. See [The MCP endpoint](#the-mcp-endpoint) below. |
+| `HUMANPORT_REQUIRE_AGENT_KEY` | `config/runtime.exs` | unset — agent keys are optional | Set to `true` (or `1`) to make `/api/v1` and `/mcp` refuse every request that carries no agent key. Any other value leaves it off. The web inbox is not affected. See [Agent keys](#agent-keys). |
 | `HUMANPORT_MCP_AWAIT_TIMEOUT_SECONDS` | `config/runtime.exs` | `50` | The ceiling on the MCP `await` tool's own wait, in seconds — independent of (but defaulting to match) `HUMANPORT_LONG_POLL_MAX_WAIT_SECONDS` above. See [The MCP endpoint](#the-mcp-endpoint) below for what `await` actually does with this. |
 
 ### Setting `HUMANPORT_CF_ACCESS_TEAM_DOMAIN` changes what an unauthenticated request gets
@@ -164,6 +168,55 @@ boot, with nothing else to undo.
 The `db` service's own credentials (`POSTGRES_USER`, `POSTGRES_PASSWORD`,
 `POSTGRES_DB`) are fixed in `compose.yaml` and match `DATABASE_URL`'s default —
 change them together if you change either.
+
+## Agent keys
+
+An agent key is a revocable credential an agent sends on `/api/v1` and
+`/mcp`:
+
+```text
+Authorization: Bearer hp_<prefix>_<secret>
+```
+
+A request created with a valid key is recorded with
+`requester_verified: true`, and `requester_label` is the key's own label. A
+label the agent sends itself is ignored in that case. The inbox shows the
+requester as verified.
+
+Issue, list and revoke keys on the running instance:
+
+```bash
+docker compose exec app bin/humanport rpc 'Humanport.Release.issue_agent_key("deploy-bot")'
+docker compose exec app bin/humanport rpc 'Humanport.Release.list_agent_keys()'
+docker compose exec app bin/humanport rpc 'Humanport.Release.revoke_agent_key("<id>")'
+```
+
+The token is printed once, when the key is issued. Only a SHA-256 digest of
+it is stored, so a lost token cannot be recovered: revoke the key and issue a
+new one. Issuing and revoking each write an audit event (`agent_key.issued`,
+`agent_key.revoked`) that names the key and never contains the token.
+
+How a key is checked:
+
+- **A valid key** makes the request act as that key: a verified agent.
+- **A key that does not work** — malformed, unknown, wrong or revoked — is
+  refused with `401`. A broken credential is never quietly treated as no
+  credential.
+- **No key** is accepted as before, unverified. Set
+  `HUMANPORT_REQUIRE_AGENT_KEY=true` to refuse it with `401` instead.
+- **Behind Cloudflare Access**, the key comes on top of the Access token,
+  not instead of it: a request still needs a valid Access token to get in at
+  all.
+
+**A key can answer other requests, never its own.** A key may respond to
+requests over `POST /api/v1/requests/:id/respond`, and is then recorded in
+`decided_by` as a verified agent. It may not answer, approve, reject or
+choose on a request it created itself — that is refused with `403`
+(`forbidden`), so an agent cannot approve its own action. Requests created
+without a key can be answered by any key.
+
+What agent keys do **not** add: authorization beyond that one rule (any
+valid key can read and answer any other request), or tenancy.
 
 ## `POST /api/v1/requests/:id/respond` body shapes
 
@@ -216,11 +269,12 @@ trail from one created over `/api/v1` — there is one write path, not two.
   of this application is — see [Limits of this version](#limits-of-this-version)
   for what that does and does not mean for `PROTO-04`-style multi-node
   retrieval, which this version does not implement.
-- **No authentication of its own.** `/mcp` depends on exactly the same
-  Cloudflare Access gate `/api/v1` does — see
+- **The same authentication as `/api/v1`.** `/mcp` sits behind the same
+  Cloudflare Access gate, when one is configured (see
   [Setting `HUMANPORT_CF_ACCESS_TEAM_DOMAIN`](#setting-humanport_cf_access_team_domain-changes-what-an-unauthenticated-request-gets)
-  above. Without it, `/mcp` is exactly as unauthenticated as the rest of this
-  version.
+  above), and accepts the same [agent keys](#agent-keys) as an
+  `Authorization: Bearer` header. With neither, `/mcp` is exactly as
+  unauthenticated as the rest of this version.
 - **Five tools so far.** `tools/list` currently returns `ask` (creates a
   free-text request), `approve` (creates an approval request — it asks a
   human to approve or reject; it does NOT itself decide anything), `choose`
