@@ -19,6 +19,8 @@ defmodule HumanportWeb.Router do
   pipeline :api do
     plug :accepts, ["json"]
     plug HumanportWeb.Plugs.ResolveActor
+    # SEC-04/05 — after ResolveActor, never instead of it (see the plug).
+    plug HumanportWeb.Plugs.AuthenticateAgent
   end
 
   # OPS-06, D-06/D-07 — deliberately NOT ResolveActor. `/health` and `/ready`
@@ -38,6 +40,7 @@ defmodule HumanportWeb.Router do
     plug HumanportWeb.Plugs.McpTransportGuard
     plug :accepts, ["json"]
     plug HumanportWeb.Plugs.ResolveActor
+    plug HumanportWeb.Plugs.AuthenticateAgent
   end
 
   scope "/", HumanportWeb do

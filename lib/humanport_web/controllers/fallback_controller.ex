@@ -41,7 +41,7 @@ defmodule HumanportWeb.FallbackController do
       :conflict -> {:conflict, "conflict", message, %{}}
       :not_implemented -> {:unprocessable_entity, "not_implemented", message, %{}}
       :invalid -> {:unprocessable_entity, "invalid", message, AshErrorMapper.details(error)}
-      :forbidden -> {:forbidden, "invalid", message, %{}}
+      :forbidden -> {:forbidden, "forbidden", message, %{}}
       :internal -> {:internal_server_error, "internal", message, %{}}
     end
   end

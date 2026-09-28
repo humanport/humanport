@@ -101,6 +101,10 @@ services:
       # blank-safe, and this one already was.
       HUMANPORT_MCP_AWAIT_TIMEOUT_SECONDS: ${HUMANPORT_MCP_AWAIT_TIMEOUT_SECONDS:-}
       HUMANPORT_MCP_ALLOWED_ORIGINS: ${HUMANPORT_MCP_ALLOWED_ORIGINS:-}
+      # SEC-04/05 — see docs/SELF_HOSTING.md, "Agent keys". Declared here for
+      # the same reason as every variable above: a value in --env-file never
+      # reaches the container unless this file names it.
+      HUMANPORT_REQUIRE_AGENT_KEY: ${HUMANPORT_REQUIRE_AGENT_KEY:-}
     # Published on the LOOPBACK ONLY, and this one is load-bearing rather than tidy.
     # Until the Cloudflare Access gate lands, request_controller.ex's own moduledoc names
     # the network boundary as the compensating control for an intentionally

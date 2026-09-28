@@ -190,7 +190,7 @@ defmodule Humanport.Requests.HumanRequest do
       # reach a terminal state.
       validate {Humanport.Requests.Validations.ChooseRequiresOptions, []}
 
-      change set_attribute(:requester_verified, false)
+      change {Humanport.Requests.Changes.SetRequester, []}
       change {Humanport.Requests.Changes.SetTenantId, []}
     end
 
@@ -323,6 +323,12 @@ defmodule Humanport.Requests.HumanRequest do
     # D-12 — the requesting agent's label, recorded honestly as unverified.
     attribute :requester_label, :string, public?: true
     attribute :requester_verified, :boolean, default: false, allow_nil?: false, public?: true
+
+    # SEC-04/05 — the agent key that created this request, when one did
+    # (see `Humanport.Requests.Changes.SetRequester`). Never accepted from
+    # the wire and never rendered; it exists so `Humanport.Requests` can
+    # refuse to let a key answer its own request.
+    attribute :requester_agent_key_id, :uuid, public?: false
 
     attribute :answer, :string, public?: true
     attribute :decision, :atom, constraints: [one_of: [:approved, :rejected]], public?: true

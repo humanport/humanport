@@ -21,7 +21,8 @@ defmodule Humanport.Audit do
   @doc """
   Writes one §23 audit event. `event_type` is a string like
   `"request.created"` / `"request.responded"`. `attrs` is a plain map:
-  `tenant_id`, `request_id`, `resource_type`, `resource_id`, `previous_state`,
+  `tenant_id`, `request_id` (nil for an event about no request, such as an
+  agent key being issued), `resource_type`, `resource_id`, `previous_state`,
   `new_state` (atoms or strings, normalized to strings), `actor`
   (`%Humanport.Actors.Actor{}`, required), and an optional `metadata` map
   (defaults to `%{}` — §23 forbids automatically copying sensitive payloads
@@ -39,7 +40,7 @@ defmodule Humanport.Audit do
       event_type: event_type,
       occurred_at: DateTime.utc_now(),
       tenant_id: Map.fetch!(attrs, :tenant_id),
-      request_id: Map.fetch!(attrs, :request_id),
+      request_id: Map.get(attrs, :request_id),
       actor_id: actor.id,
       actor_type: actor.type,
       actor_label: actor.label,

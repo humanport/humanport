@@ -70,6 +70,10 @@ defmodule Humanport.Requests do
   """
   @spec answer(Ash.Resource.record(), String.t(), Actor.t()) ::
           {:ok, Ash.Resource.record()} | {:error, term()}
+  def answer(%HumanRequest{requester_agent_key_id: id}, _answer, %Actor{type: :agent, id: id})
+      when is_binary(id),
+      do: self_answer_error()
+
   def answer(%HumanRequest{type: :approve}, _answer, %Actor{}) do
     {:error,
      Ash.Error.Invalid.exception(
@@ -117,6 +121,10 @@ defmodule Humanport.Requests do
   """
   @spec approve(Ash.Resource.record(), Actor.t()) ::
           {:ok, Ash.Resource.record()} | {:error, term()}
+  def approve(%HumanRequest{requester_agent_key_id: key_id}, %Actor{type: :agent, id: key_id})
+      when is_binary(key_id),
+      do: self_answer_error()
+
   def approve(%HumanRequest{type: :ask}, %Actor{}) do
     {:error,
      Ash.Error.Invalid.exception(
@@ -194,6 +202,14 @@ defmodule Humanport.Requests do
   """
   @spec choose(Ash.Resource.record(), map(), Actor.t()) ::
           {:ok, Ash.Resource.record()} | {:error, term()}
+  def choose(
+        %HumanRequest{requester_agent_key_id: key_id},
+        _selection,
+        %Actor{type: :agent, id: key_id}
+      )
+      when is_binary(key_id),
+      do: self_answer_error()
+
   def choose(%HumanRequest{type: type}, _selection, %Actor{}) when type != :choose do
     {:error,
      Ash.Error.Invalid.exception(
@@ -298,6 +314,10 @@ defmodule Humanport.Requests do
   """
   @spec reject(Ash.Resource.record(), Actor.t()) ::
           {:ok, Ash.Resource.record()} | {:error, term()}
+  def reject(%HumanRequest{requester_agent_key_id: key_id}, %Actor{type: :agent, id: key_id})
+      when is_binary(key_id),
+      do: self_answer_error()
+
   def reject(%HumanRequest{type: :ask}, %Actor{}) do
     {:error,
      Ash.Error.Invalid.exception(
@@ -329,6 +349,16 @@ defmodule Humanport.Requests do
         {:error, error} -> Ash.DataLayer.rollback(HumanRequest, error)
       end
     end)
+  end
+
+  # SEC-04/05 — an agent key may answer other requests, never its own: a key
+  # that could approve what it asked for would make the approval meaningless.
+  # Checked before any transaction opens, like the type guards above — the
+  # requester never changes on a request, so this is a caller error, not a
+  # race, and needs no atomic form.
+  defp self_answer_error do
+    {:error,
+     Ash.Error.Forbidden.exception(errors: [Humanport.Requests.Errors.SelfAnswer.exception([])])}
   end
 
   defp do_submit(params, actor) do

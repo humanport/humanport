@@ -91,7 +91,10 @@ defmodule Humanport.Audit.Event do
     attribute :occurred_at, :utc_datetime_usec, allow_nil?: false, public?: true
 
     attribute :tenant_id, :uuid, allow_nil?: false, public?: true
-    attribute :request_id, :uuid, allow_nil?: false, public?: true
+    # Nil for an event that belongs to no request — an agent key being
+    # issued or revoked (`Humanport.Agents`). `resource_type`/`resource_id`
+    # always name what the event is about.
+    attribute :request_id, :uuid, public?: true
 
     # D-11/D-12 additions to §23's minimum — required so a local unverified
     # entry stays distinguishable from a Phase 2 verified one.

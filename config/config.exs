@@ -55,13 +55,17 @@ config :spark,
 config :humanport,
   ecto_repos: [Humanport.Repo],
   generators: [timestamp_type: :utc_datetime],
-  ash_domains: [Humanport.Requests, Humanport.Audit],
+  ash_domains: [Humanport.Requests, Humanport.Audit, Humanport.Agents],
   # D-09 — the actor-resolver seam. Phase 2 swaps this for
   # Humanport.Actors.Resolvers.CloudflareAccess without touching a write path.
   actor_resolver: Humanport.Actors.Resolvers.Env,
   # D-05 — never accepted from the wire. A stable default UUID, overridable
   # per environment in config/runtime.exs.
   default_tenant_id: "00000000-0000-0000-0000-000000000001",
+  # SEC-04/05 — off by default: a bare `docker compose up` keeps accepting
+  # agent requests with no key, exactly as before keys existed. See
+  # HUMANPORT_REQUIRE_AGENT_KEY in config/runtime.exs.
+  require_agent_key: false,
   # D-09c (02.1-CONTEXT.md) — the MCP surface. The advertised revision list
   # is fixed by the owner's decision recorded in priv/mcp/README.md, not
   # read from the environment: widening it is a protocol decision, not a
