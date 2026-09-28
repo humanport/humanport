@@ -31,11 +31,10 @@ defmodule Humanport.Requests.HumanRequest do
   `postgres.custom_statements` below declares
   `human_requests_terminal_is_final()`, a `BEFORE UPDATE` trigger that raises
   whenever `OLD.completed_at` is already set — regardless of which code path
-  issued the `UPDATE`. The atomic transition guard and the atomic
-  `completed_at` filter on `:answer`/`:approve`/`:reject` are the mechanisms
-  that produce CORE-07's *deterministic conflict result* for a losing
-  concurrent responder going through those actions; this trigger is a
-  backstop for every other code path — a console session, a future script, a
+  issued the `UPDATE`. The atomic transition guard is the mechanism that
+  produces CORE-07's *deterministic conflict result* for a losing concurrent
+  responder going through `:answer`/`:approve`/`:reject`/`:choose`; this
+  trigger is a backstop for every other code path — a console session, a future script, a
   mistake in a later phase. Its error is deliberately ugly on purpose:
   reaching it means something bypassed the domain. It does **not** stand in
   for §54.8 content-binding (that is the content-hash-bound approval record,
@@ -197,9 +196,14 @@ defmodule Humanport.Requests.HumanRequest do
     update :answer do
       argument :answer, :string, allow_nil?: false
 
-      # Pattern 4(b) — an explicit, atomic-safe widening of what counts as a
-      # conflict. Composes with the atomic transition guard below without
-      # breaking atomicity.
+      # Pattern 4(b). This filter is NOT the concurrency guard: in the
+      # installed Ash version it does not reach the atomic UPDATE's WHERE
+      # clause (the generated SQL filters on `id` only, and the agent-key
+      # `:revoke` test proved a filter written this way lets a stale caller
+      # through). It only takes effect on Ash's no-op update path. The
+      # guarantee comes from `transition_state/1` below, compiled into the
+      # UPDATE, and from the terminal-row trigger. Kept because it is
+      # harmless and atomic-safe; do not rely on it.
       change filter(expr(is_nil(completed_at)))
       change set_attribute(:answer, arg(:answer))
       change set_attribute(:completed_at, &DateTime.utc_now/0)

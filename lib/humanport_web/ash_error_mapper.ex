@@ -35,8 +35,10 @@ defmodule HumanportWeb.AshErrorMapper do
       Enum.any?(errors, &match?(%Ash.Error.Query.NotFound{}, &1)) ->
         {:not_found, "Request not found."}
 
-      # Ash stale-record — the atomic `filter(expr(is_nil(completed_at)))`
-      # guard lost this row to a concurrent responder.
+      # Ash stale-record — raised when an update's changeset filter matches
+      # no row. The `completed_at` filter on the decision actions only gets
+      # this far on Ash's no-op update path (see HumanRequest's `:answer`);
+      # a real concurrent loser arrives as NoMatchingTransition below.
       Enum.any?(errors, &match?(%Ash.Error.Changes.StaleRecord{}, &1)) ->
         {:conflict, "This request was already answered."}
 
