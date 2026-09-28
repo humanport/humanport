@@ -10,10 +10,10 @@ defmodule Humanport.Agents.AgentKey do
   and this one has none to protect. `prefix` is random too, stored in the
   clear and unique, and only locates the row; it proves nothing on its own.
 
-  Nothing ever deletes a key. Revoking sets `revoked_at`, which the atomic
-  `filter` on `:revoke` refuses to overwrite, so a key's revocation time is
-  written once and a second revoke is a stale-record error rather than a
-  silent re-stamp. Written only through `Humanport.Agents`, which pairs each
+  Nothing ever deletes a key. Revoking sets `revoked_at`, and the atomic
+  validation on `:revoke` refuses to overwrite it, so a key's revocation
+  time is written once and a second revoke is an error rather than a silent
+  re-stamp. Written only through `Humanport.Agents`, which pairs each
   change with its audit event in one transaction.
   """
 
@@ -43,7 +43,12 @@ defmodule Humanport.Agents.AgentKey do
     end
 
     update :revoke do
-      change filter(expr(is_nil(revoked_at)))
+      # Compiled into the UPDATE itself, so it checks the row as stored, not
+      # the caller's possibly stale copy. It must come BEFORE the change
+      # below: after it, the attribute would already read as the new
+      # timestamp. (`change filter(...)` looks like it would do this, but on
+      # a single-record update it never reaches the WHERE clause.)
+      validate absent(:revoked_at), message: "this agent key is already revoked"
       change set_attribute(:revoked_at, &DateTime.utc_now/0)
     end
   end
