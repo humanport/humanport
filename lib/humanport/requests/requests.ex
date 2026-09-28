@@ -65,8 +65,8 @@ defmodule Humanport.Requests do
   Guards the type/action pairing before opening the transaction: answering an
   `:approve` request with free text is a caller error, not a race (the type
   never changes), so it returns a plain error the HTTP boundary maps to 422
-  rather than widening the atomic `filter` on `:answer` and turning a type
-  mismatch into a conflict result.
+  rather than letting the mismatch reach the atomic `:answer` action and
+  turning a type mismatch into a conflict result.
   """
   @spec answer(Ash.Resource.record(), String.t(), Actor.t()) ::
           {:ok, Ash.Resource.record()} | {:error, term()}
