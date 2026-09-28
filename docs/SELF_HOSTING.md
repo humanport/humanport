@@ -27,9 +27,12 @@ It builds the image, starts the stack, creates an `ask` and an `approve`
 request over plain HTTP, restarts the application container mid-flight and
 confirms both requests survive unchanged, confirms a long-poll wait returns
 the moment an answer arrives rather than at its timeout, confirms a second
-response to an already-decided request is refused as a conflict, confirms an
-unimplemented request type (`choose`, `escalate`) is refused rather than
-silently accepted, and tears everything down again. It is safe to re-run.
+response to an already-decided request is refused as a conflict, and answers a
+`choose` request with a selection. It then plays an agent over
+[the MCP endpoint](#the-mcp-endpoint): `server/discover`, `tools/list`, an
+`ask` whose `await` stream delivers the answer the moment a human gives it,
+`check`, and a `choose` and an `approve` round-trip. Then it tears everything
+down again. It is safe to re-run, and CI runs it on every push.
 
 ## The only required infrastructure dependency is PostgreSQL
 
