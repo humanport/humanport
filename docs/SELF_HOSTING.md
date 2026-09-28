@@ -79,16 +79,13 @@ not a guarantee this version makes.
 
 ## Limits of this version
 
-**This build must not be exposed to the internet.** Read that as an
-operational warning, not a footnote: there is no authentication, no
+**By default, this build must not be exposed to the internet.** Read that as
+an operational warning, not a footnote: out of the box — a bare
+`docker compose up` with nothing configured — there is no authentication, no
 authorization, and no tenancy in the application itself. Every request to the
-API and the web inbox is served to whoever can reach the port — there is
-nothing in front of it deciding whether they should be able to. Putting a
-gate in front of the application (so far, a single-user access gate is the
-plan) is required before this is reachable from anywhere but a trusted
-network, and that gate is not part of this version.
+API and the web inbox is served to whoever can reach the port.
 
-Concretely, in this version:
+Concretely, with nothing configured:
 
 - No login. No session belongs to a specific person; the acting human is read
   from an environment variable and recorded as unverified.
@@ -96,9 +93,34 @@ Concretely, in this version:
   answer a request.
 - No tenancy boundary that is actually enforced at the access-control layer,
   even though the schema already carries a tenant column for later.
+- The requesting agent's name (`requester_label`) is whatever the agent sent,
+  recorded and rendered as unverified.
 
-Run it on a machine you trust, on a network you trust, and treat "next to my
-other local services" as the threat model this version is built for.
+Run it like that only on a machine you trust, on a network you trust, and
+treat "next to my other local services" as the threat model.
+
+### The optional gate: Cloudflare Access
+
+This version can sit behind a [Cloudflare
+Access](https://developers.cloudflare.com/cloudflare-one/policies/access/)
+application. Setting `HUMANPORT_CF_ACCESS_TEAM_DOMAIN` and
+`HUMANPORT_CF_ACCESS_AUD` (see [Environment variables](#environment-variables))
+makes the application verify the Access token on every API and inbox request
+and refuse anything without a valid one — before that, read [what setting the
+team domain changes](#setting-humanport_cf_access_team_domain-changes-what-an-unauthenticated-request-gets).
+A human is then recorded as verified, and a Cloudflare service token as a
+verified service.
+
+What the gate does **not** add:
+
+- Authorization. Anyone Cloudflare Access lets through can see and answer
+  every request. Who gets through is decided entirely by your Access policy —
+  keep it to the people and service tokens you intend.
+- Tenancy. There is still exactly one tenant.
+- A verified agent identity. The agent's `requester_label` is still
+  self-reported and still shown as unverified.
+- Protection for `/health` and `/ready`, which never pass through the gate —
+  see [Health, readiness, and what a sustained "unhealthy" actually causes](#health-readiness-and-what-a-sustained-unhealthy-actually-causes).
 
 ## Environment variables
 
