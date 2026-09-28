@@ -91,6 +91,16 @@ services:
       HUMANPORT_LONG_POLL_MAX_WAIT_SECONDS: ${HUMANPORT_LONG_POLL_MAX_WAIT_SECONDS:-}
       POOL_SIZE: ${POOL_SIZE:-}
       ECTO_IPV6: ${ECTO_IPV6:-}
+      # 02.1-03-PLAN.md Task 1 Part D. HUMANPORT_MCP_AWAIT_TIMEOUT_SECONDS'
+      # reader is blank-safe (config/runtime.exs, same blank_to_nil idiom as
+      # every variable above). HUMANPORT_MCP_ALLOWED_ORIGINS was created and
+      # given a blank-safe reader in 02.1-02-PLAN.md but only reached
+      # .env.example, never this file — the same gap the 2026-09-03 audit
+      # found for the four variables above, closed here for the same reason:
+      # a variable may not enter compose.yaml until its reader is
+      # blank-safe, and this one already was.
+      HUMANPORT_MCP_AWAIT_TIMEOUT_SECONDS: ${HUMANPORT_MCP_AWAIT_TIMEOUT_SECONDS:-}
+      HUMANPORT_MCP_ALLOWED_ORIGINS: ${HUMANPORT_MCP_ALLOWED_ORIGINS:-}
     # Published on the LOOPBACK ONLY, and this one is load-bearing rather than tidy.
     # Until the Cloudflare Access gate lands, request_controller.ex's own moduledoc names
     # the network boundary as the compensating control for an intentionally

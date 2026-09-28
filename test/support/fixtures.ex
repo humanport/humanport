@@ -35,6 +35,22 @@ defmodule Humanport.Fixtures do
     request
   end
 
+  @doc """
+  Builds a `HumanRequest` of the `choose` type via `Humanport.Requests.submit/2`,
+  with a small default option list. Accepts the same keys `request_fixture/1`
+  does, plus `:options` to override the default list.
+  """
+  def choose_request_fixture(attrs \\ %{}) do
+    default_options = [
+      %{id: "opt-a", label: "Option A"},
+      %{id: "opt-b", label: "Option B", description: "The second choice", recommended: true}
+    ]
+
+    attrs = Map.put_new(attrs, :options, default_options)
+
+    request_fixture(Map.put(attrs, :type, :choose))
+  end
+
   @doc "The default unverified human actor used when a fixture doesn't need a specific one."
   def default_actor do
     %Actor{id: nil, type: :human, label: "owner@localhost", verified?: false, method: nil}

@@ -27,9 +27,12 @@ It builds the image, starts the stack, creates an `ask` and an `approve`
 request over plain HTTP, restarts the application container mid-flight and
 confirms both requests survive unchanged, confirms a long-poll wait returns
 the moment an answer arrives rather than at its timeout, confirms a second
-response to an already-decided request is refused as a conflict, confirms an
-unimplemented request type (`choose`, `escalate`) is refused rather than
-silently accepted, and tears everything down again. It is safe to re-run.
+response to an already-decided request is refused as a conflict, and answers a
+`choose` request with a selection. It then plays an agent over
+[the MCP endpoint](#the-mcp-endpoint): `server/discover`, `tools/list`, an
+`ask` whose `await` stream delivers the answer the moment a human gives it,
+`check`, and a `choose` and an `approve` round-trip. Then it tears everything
+down again. It is safe to re-run, and CI runs it on every push.
 
 ## The only required infrastructure dependency is PostgreSQL
 
@@ -140,6 +143,8 @@ ones that matter for your situation.
 | `POOL_SIZE` | `config/runtime.exs` | `10` | The Ecto connection pool size. |
 | `HUMANPORT_CF_ACCESS_TEAM_DOMAIN` | `config/runtime.exs` | unset or blank — `Resolvers.Env`, `verified? false` | The Cloudflare Access team name (just the name, not a URL — the application derives both the JWKS URL and the expected issuer from this one value, so the two can never disagree). Setting this to a **non-blank** value swaps the actor resolver to `Resolvers.CloudflareAccess` and makes `HUMANPORT_CF_ACCESS_AUD` required. Blank counts as unset, because `compose.yaml` declares this variable as `${VAR:-}` — the only Compose form that reads a value out of `--env-file` — and that renders as an empty string whenever nothing is configured. **Read the paragraph below before setting this.** |
 | `HUMANPORT_CF_ACCESS_AUD` | `config/runtime.exs` | required if the team domain is set; unused otherwise | The AUD tag of THIS instance's own Cloudflare Access application, copied from its dashboard. Without it, a token minted for any other Access application in the same Cloudflare account would be accepted — the application refuses to start with a team domain set and no AUD tag, rather than starting half-configured. |
+| `HUMANPORT_MCP_ALLOWED_ORIGINS` | `config/runtime.exs` | unset — every browser-originated `/mcp` request is refused | A comma-separated list of `Origin` values allowed to reach `POST /mcp`. Only relevant to a browser-based caller; a non-browser agent runtime never sends an `Origin` header at all, so this never affects it either way. See [The MCP endpoint](#the-mcp-endpoint) below. |
+| `HUMANPORT_MCP_AWAIT_TIMEOUT_SECONDS` | `config/runtime.exs` | `50` | The ceiling on the MCP `await` tool's own wait, in seconds — independent of (but defaulting to match) `HUMANPORT_LONG_POLL_MAX_WAIT_SECONDS` above. See [The MCP endpoint](#the-mcp-endpoint) below for what `await` actually does with this. |
 
 ### Setting `HUMANPORT_CF_ACCESS_TEAM_DOMAIN` changes what an unauthenticated request gets
 
@@ -159,6 +164,125 @@ boot, with nothing else to undo.
 The `db` service's own credentials (`POSTGRES_USER`, `POSTGRES_PASSWORD`,
 `POSTGRES_DB`) are fixed in `compose.yaml` and match `DATABASE_URL`'s default —
 change them together if you change either.
+
+## `POST /api/v1/requests/:id/respond` body shapes
+
+The body's shape is decided by the request's own type, not by a field
+naming the type explicitly:
+
+- An `ask` request: `{"answer": "<free text>"}`.
+- An `approve` request: `{"decision": "approve"}` or `{"decision": "reject"}`.
+- A `choose` request (CORE-04): `{"selected_option_ids": ["<id>", ...]}`
+  (a list, possibly empty when free text is given instead), and/or
+  `{"free_text": "<text>"}` on a request whose `allow_free_text` is `true`.
+  A body naming `selected_option_ids` is dispatched ahead of a free-text-only
+  body, so a body carrying both goes through the identical
+  `Humanport.Requests.choose/3` call with both fields exactly as sent —
+  there is one write path here too, the same domain function the `choose`
+  MCP tool's own answer path and the web inbox's decision block both call.
+  The result renders `selected_option_ids` (a list, even for one selection)
+  and `free_text`, alongside `decided_by`/`decided_at` — never the
+  approve/reject `decision` field, which a `choose` result never carries.
+
+Sending the wrong shape for the request's own type is `422` (`invalid`),
+never `409` — an agent's retry loop needs to be able to tell "this call was
+malformed" apart from "someone else already answered."
+
+## The MCP endpoint
+
+`POST /mcp` is the same product as `POST /api/v1/requests` and its two
+siblings, reached from an agent runtime instead of a plain HTTP client. A
+request created through it is written through the identical
+`Humanport.Requests.submit/2` domain function the HTTP controller calls, and
+is indistinguishable afterwards in the inbox, in storage, and in the audit
+trail from one created over `/api/v1` — there is one write path, not two.
+
+- **One method, one path.** `POST` is the only method this endpoint answers.
+  `GET` and `DELETE` both return `405` — this revision of the protocol
+  (`2026-07-28`) defines no meaning for either on this endpoint: no
+  standalone event stream, no session-delete verb.
+- **Required headers.** Every request carries `MCP-Protocol-Version`,
+  `Mcp-Method`, and — for a `tools/call` — `Mcp-Name`, each mirroring a value
+  already present in the JSON-RPC body. A disagreement between a header and
+  the body is refused `400`; this is the transport-level integrity check the
+  spec requires, not an authentication mechanism.
+- **`server/discover` advertises `2026-07-28` only.** No `initialize`
+  handshake exists in this revision, and none is implemented here. A request
+  naming a protocol version this instance does not support is refused `400`
+  with the versions it does support.
+- **No session state.** This revision removed protocol-level MCP sessions
+  entirely: this endpoint mints no session id, echoes none back, and ignores
+  one if an older client sends it. It is stateless in the same sense the rest
+  of this application is — see [Limits of this version](#limits-of-this-version)
+  for what that does and does not mean for `PROTO-04`-style multi-node
+  retrieval, which this version does not implement.
+- **No authentication of its own.** `/mcp` depends on exactly the same
+  Cloudflare Access gate `/api/v1` does — see
+  [Setting `HUMANPORT_CF_ACCESS_TEAM_DOMAIN`](#setting-humanport_cf_access_team_domain-changes-what-an-unauthenticated-request-gets)
+  above. Without it, `/mcp` is exactly as unauthenticated as the rest of this
+  version.
+- **Five tools so far.** `tools/list` currently returns `ask` (creates a
+  free-text request), `approve` (creates an approval request — it asks a
+  human to approve or reject; it does NOT itself decide anything), `choose`
+  (creates a request asking a human to pick from a set of caller-supplied,
+  opaque named options — CORE-04; it does NOT itself decide anything
+  either, and the options it is given are stored and returned unchanged,
+  never interpreted), `check` (an immediate, non-waiting glance at a
+  request's current state) and `await` (see below). `escalate` is later
+  work, not yet reachable here.
+  - A `choose` call's `options` argument is a list of `{id, label,
+    description?, recommended?}` objects. `id` and `label` are required;
+    `description` and `recommended` are optional and come back exactly as
+    absent when omitted — never defaulted to a value HumanPort invented.
+    `recommended` is advice shown beside an option, never a default and
+    never a pre-selection: a human who submits without choosing submits
+    nothing, regardless of which option (if any) was marked recommended.
+  - The human's answer, once made, is always a **list** of chosen option
+    ids — even when only one may be chosen (`max_selections`, defaulting to
+    `1`) — because a scalar result now would have to become a list later,
+    breaking the published contract exactly when the first SDKs exist. When
+    `allow_free_text` is `true`, the human may answer with free text
+    instead of an option id; the result names which happened by which of
+    `selected_option_ids`/`free_text` came back populated.
+- **`check` and `await` are the same primitive's two branches.** `check`
+  reads and returns immediately, whatever the request's state. `await`
+  holds the connection open until the request is answered or its own
+  ceiling elapses (`HUMANPORT_MCP_AWAIT_TIMEOUT_SECONDS` above, defaulting
+  to match `HUMANPORT_LONG_POLL_MAX_WAIT_SECONDS`). Both render the
+  identical result shape — the created/read request's own wire
+  representation, plus a small `_meta` object (`app.humanport/wait`)
+  carrying `waited_ms` (how long THIS call itself waited — always `0` for
+  `check`) and `pending_for_ms` (how long the request has been pending, or
+  was pending before it was answered).
+- **`await` answers as a Server-Sent Events stream, not a silently blocking
+  POST.** The `Content-Type` is `text/event-stream`, with an
+  `X-Accel-Buffering: no` header telling any reverse proxy in front of this
+  instance not to buffer the response — buffering would defeat the whole
+  point, delivering nothing to the client until the proxy's own buffer
+  flushes or the connection ends. While the request stays pending, the
+  stream carries periodic blank SSE comment lines (a bare `:` per line) as
+  a keep-alive — this is what lets `await` hold a connection open longer
+  than an idle intermediary would otherwise tolerate; the cadence is
+  configured internally and is not operator-tunable in this version. When
+  the request is answered, or when `await`'s own ceiling elapses with no
+  answer, the stream carries exactly one final JSON-RPC response and then
+  closes. A window that closes with no answer is an ORDINARY result
+  (`waited_ms`/`pending_for_ms` and the request's still-pending state) —
+  never an error, and never a JSON-RPC error response either way; that
+  split is reserved for genuine protocol faults (unknown method, header
+  mismatch), never for "nobody has answered yet."
+- **Closing the connection cancels the wait.** This protocol revision has
+  no client-to-server cancellation message; the client closing its end of
+  an `await` connection is itself the cancellation signal, and this
+  instance stops working on that wait as soon as it notices — no further
+  bytes are written for a closed connection. Two `await` calls on the same
+  request are independent of each other: closing one never affects the
+  other.
+- **If you put a reverse proxy in front of this instance,** it must not
+  buffer `await`'s response and must not impose an idle/response timeout
+  shorter than `HUMANPORT_MCP_AWAIT_TIMEOUT_SECONDS`. The `X-Accel-Buffering:
+  no` header is this instance's own request not to buffer; whether your
+  proxy honours it depends on the proxy.
 
 ## Health, readiness, and what a sustained "unhealthy" actually causes
 

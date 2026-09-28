@@ -28,6 +28,18 @@ defmodule HumanportWeb.Router do
     plug :accepts, ["json"]
   end
 
+  # D-09/D-09c (02.1-CONTEXT.md) — the MCP surface. McpTransportGuard runs
+  # FIRST so a wrong-method or wrong-origin request is refused before any
+  # identity work happens. Reuses ResolveActor unchanged, exactly as :api
+  # does — an MCP tool call is a write on behalf of someone, never a
+  # liveness probe, so this deliberately does NOT copy :health's omission
+  # of the actor resolver.
+  pipeline :mcp do
+    plug HumanportWeb.Plugs.McpTransportGuard
+    plug :accepts, ["json"]
+    plug HumanportWeb.Plugs.ResolveActor
+  end
+
   scope "/", HumanportWeb do
     pipe_through :health
 
@@ -52,5 +64,17 @@ defmodule HumanportWeb.Router do
     post "/requests", RequestController, :create
     get "/requests/:id", RequestController, :show
     post "/requests/:id/respond", RequestController, :respond
+  end
+
+  # D-09/D-09c — one route; JSON-RPC method dispatch (server/discover,
+  # tools/list, tools/call) happens inside McpController, not via several
+  # router entries. `match :*` catches every non-POST verb that
+  # McpTransportGuard did not already halt (belt-and-braces — see that
+  # plug's and McpController.method_not_allowed/2's own moduledocs).
+  scope "/mcp", HumanportWeb do
+    pipe_through :mcp
+
+    post "/", McpController, :handle
+    match :*, "/", McpController, :method_not_allowed
   end
 end

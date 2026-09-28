@@ -25,7 +25,23 @@ defmodule Humanport.Application do
     # See https://elixir.hexdocs.pm/Supervisor.html
     # for other strategies and supported options
     opts = [strategy: :one_for_one, name: Humanport.Supervisor]
-    Supervisor.start_link(children, opts)
+
+    # 02.1-03-PLAN.md Task 1 Part C — a misconfigured timeout relation that
+    # would silently shorten every MCP `await` must be a loud boot failure,
+    # the same precedent config/runtime.exs already sets with its
+    # half-configured-Access raise. Called HERE, immediately once the
+    # supervisor (Endpoint included) has started rather than before, because
+    # `HumanportWeb.MCP.Timeouts.verify!/0` reads the EFFECTIVE transport
+    # bound through `HumanportWeb.Endpoint.config/2` (see that module's own
+    # moduledoc for why: it is an ETS-cached value Phoenix only populates
+    # once the Endpoint's own supervisor has finished starting — reading it
+    # any earlier is not possible). `verify!/0` raising here still fails
+    # this function, which still fails application boot — an operator sees
+    # a crash, never a silently truncated wait.
+    with {:ok, pid} <- Supervisor.start_link(children, opts) do
+      HumanportWeb.MCP.Timeouts.verify!()
+      {:ok, pid}
+    end
   end
 
   # Tell Phoenix to update the endpoint configuration

@@ -12,8 +12,10 @@ defmodule Humanport.Requests.AtomicityTest do
   the next run — this is that test.
 
   Also asserts the transition table itself, so a later phase cannot quietly
-  widen the Phase 1 vocabulary: exactly three transitions, all from
-  `:pending`, to `:answered`, `:approved` and `:rejected`. `:routed` and
+  widen the vocabulary further: exactly four transitions, all from
+  `:pending`, to `:answered` (twice — `:answer` and CORE-04's `:choose`,
+  which deliberately reuses the `:answered` terminal state rather than
+  introducing a `:chosen` one), `:approved` and `:rejected`. `:routed` and
   `:viewed` are §11 candidate states that belong to Phase 5.
   """
 
@@ -42,15 +44,16 @@ defmodule Humanport.Requests.AtomicityTest do
                  "landmine on Humanport.Requests.HumanRequest."
       end
 
-      assert Enum.map(update_actions, & &1.name) |> Enum.sort() == [:answer, :approve, :reject]
+      assert Enum.map(update_actions, & &1.name) |> Enum.sort() ==
+               [:answer, :approve, :choose, :reject]
     end
   end
 
-  describe "the declared transition table is exactly the Phase 1 set" do
-    test "three transitions, all from :pending, to :answered/:approved/:rejected" do
+  describe "the declared transition table is exactly the CORE-04 set" do
+    test "four transitions, all from :pending, to :answered/:approved/:rejected" do
       transitions = StateMachineInfo.state_machine_transitions(HumanRequest)
 
-      assert length(transitions) == 3
+      assert length(transitions) == 4
 
       for transition <- transitions do
         assert List.wrap(transition.from) == [:pending]
@@ -60,6 +63,7 @@ defmodule Humanport.Requests.AtomicityTest do
                [
                  answer: [:answered],
                  approve: [:approved],
+                 choose: [:answered],
                  reject: [:rejected]
                ]
                |> Enum.sort()

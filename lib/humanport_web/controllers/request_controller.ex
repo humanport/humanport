@@ -14,12 +14,19 @@ defmodule HumanportWeb.RequestController do
   is answered or `N` seconds elapse (clamped to the configured ceiling, see
   `config/runtime.exs`), then returns a fresh database read either way. A
   wait holds a process only for the duration of its own timeout, never for
-  the lifetime of the pending request (D-02).
+  the lifetime of the pending request (D-02). The wait mechanics themselves
+  live in `HumanportWeb.RequestWaiting` (02.1-03-PLAN.md Task 1) — this
+  controller subscribes/unsubscribes and delegates; it holds no mailbox loop
+  of its own. `HumanportWeb.MCP.Tools.Await` calls the exact same module.
 
   `POST /api/v1/requests/:id/respond` → 200, or 409 conflict / 422 invalid /
-  404 not found. Body carries `"answer"` for an `ask` request or
-  `"decision": "approve" | "reject"` for an `approve` request; sending the
-  wrong shape for the request's type is a 422, not a 409 — see
+  404 not found. Body carries `"answer"` for an `ask` request,
+  `"decision": "approve" | "reject"` for an `approve` request, or
+  `"selected_option_ids"` (a list, possibly empty) and/or `"free_text"` for
+  a `choose` request (CORE-04) — a body naming a selection is dispatched
+  ahead of a free-text-only body, so a body carrying both goes through
+  `Humanport.Requests.choose/3` with both fields exactly as sent. Sending
+  the wrong shape for the request's type is a 422, not a 409 — see
   `HumanportWeb.FallbackController`.
 
   Errors render as `{"error": {"code", "message", "details"}}` with the code
@@ -43,8 +50,7 @@ defmodule HumanportWeb.RequestController do
   action_fallback HumanportWeb.FallbackController
 
   alias Humanport.Requests
-
-  @terminal_states [:answered, :approved, :rejected]
+  alias HumanportWeb.RequestWaiting
 
   def create(conn, params) do
     with {:ok, request} <- Requests.submit(params, conn.assigns.actor) do
@@ -55,8 +61,8 @@ defmodule HumanportWeb.RequestController do
   end
 
   def show(conn, %{"id" => id} = params) do
-    wait = parse_wait(Map.get(params, "wait"))
-    topic = topic(id)
+    wait = RequestWaiting.parse_wait(Map.get(params, "wait"))
+    topic = RequestWaiting.topic(id)
 
     # D-01/D-02, Pattern 6 — subscribe BEFORE reading. Reading first opens a
     # window in which the answer commits and broadcasts before the
@@ -67,7 +73,7 @@ defmodule HumanportWeb.RequestController do
 
     result =
       with {:ok, request} <- Requests.get_request(id) do
-        await(id, topic, request, wait, deadline(wait))
+        RequestWaiting.await(id, topic, request, wait)
       end
 
     if wait > 0, do: HumanportWeb.Endpoint.unsubscribe(topic)
@@ -84,60 +90,6 @@ defmodule HumanportWeb.RequestController do
     end
   end
 
-  defp topic(id), do: "request:#{id}"
-
-  defp deadline(wait), do: System.monotonic_time(:millisecond) + :timer.seconds(wait)
-
-  # Already terminal — return immediately regardless of the wait parameter.
-  defp await(_id, _topic, %{state: state} = request, _wait, _deadline)
-       when state in @terminal_states do
-    {:ok, request}
-  end
-
-  # No wait requested — return the immediate (possibly pending) read as-is.
-  defp await(_id, _topic, request, wait, _deadline) when wait <= 0 do
-    {:ok, request}
-  end
-
-  defp await(id, topic, _request, wait, deadline) do
-    remaining = deadline - System.monotonic_time(:millisecond)
-
-    if remaining <= 0 do
-      # Timeout — re-read anyway. A dropped or cross-node broadcast then
-      # costs latency, not an answer; correctness never depends on the
-      # message arriving.
-      Requests.get_request(id)
-    else
-      receive do
-        %Phoenix.Socket.Broadcast{topic: ^topic} ->
-          # The broadcast proves something changed; the database proves
-          # what. Never render from the message payload — always re-read.
-          with {:ok, fresh} <- Requests.get_request(id) do
-            # If still non-terminal, keep waiting with the REMAINING budget
-            # (`deadline` is unchanged — `remaining` is recomputed from it
-            # on the next call), never a restarted full timeout.
-            await(id, topic, fresh, wait, deadline)
-          end
-      after
-        remaining ->
-          Requests.get_request(id)
-      end
-    end
-  end
-
-  defp parse_wait(nil), do: 0
-
-  defp parse_wait(raw) when is_binary(raw) do
-    case Integer.parse(raw) do
-      {n, ""} -> n |> max(0) |> min(max_wait())
-      _ -> 0
-    end
-  end
-
-  defp parse_wait(_), do: 0
-
-  defp max_wait, do: Application.get_env(:humanport, :long_poll_max_wait_seconds, 50)
-
   defp dispatch_respond(request, %{"decision" => decision}, actor) do
     case decision do
       "approve" -> Requests.approve(request, actor)
@@ -150,8 +102,33 @@ defmodule HumanportWeb.RequestController do
     Requests.answer(request, answer, actor)
   end
 
+  # CORE-04 — a body naming a selection is dispatched ahead of the
+  # free-text-only clause below, so a body carrying BOTH (the case this
+  # controller's own test file pins explicitly) always goes through
+  # `Requests.choose/3` with both fields it was sent, never ambiguously.
+  # `selected_option_ids` may be `[]` — a choose request's free-text-only
+  # answer, when a caller sends the key explicitly rather than omitting it.
+  defp dispatch_respond(request, %{"selected_option_ids" => selected_option_ids} = params, actor)
+       when is_list(selected_option_ids) do
+    Requests.choose(
+      request,
+      %{selected_option_ids: selected_option_ids, free_text: Map.get(params, "free_text")},
+      actor
+    )
+  end
+
+  # A caller who omits `selected_option_ids` entirely and sends only
+  # `free_text` — the choose request's free-text-only answer, in its
+  # shortest form.
+  defp dispatch_respond(request, %{"free_text" => free_text}, actor) when is_binary(free_text) do
+    Requests.choose(request, %{selected_option_ids: [], free_text: free_text}, actor)
+  end
+
   defp dispatch_respond(_request, _params, _actor) do
-    invalid_field_error(:body, "request body must include either \"answer\" or \"decision\"")
+    invalid_field_error(
+      :body,
+      "request body must include \"answer\", \"decision\", or \"selected_option_ids\""
+    )
   end
 
   defp invalid_field_error(field, message) do

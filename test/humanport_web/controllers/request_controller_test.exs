@@ -44,6 +44,66 @@ defmodule HumanportWeb.RequestControllerTest do
     end
   end
 
+  describe "choose over plain HTTP (CORE-04, 02.1-05-PLAN.md Task 2)" do
+    test "posting a selection returns 200 with a choice result", %{conn: conn} do
+      request = choose_request_fixture(%{title: "Pick a path"})
+
+      resp_conn =
+        post(conn, ~p"/api/v1/requests/#{request.id}/respond", %{
+          "selected_option_ids" => ["opt-a"]
+        })
+
+      body = json_response(resp_conn, 200)
+
+      assert body["status"] == "completed"
+      assert body["state"] == "answered"
+      assert body["result"]["selected_option_ids"] == ["opt-a"]
+      assert body["result"]["decided_by"]["verified"] == false
+      refute is_nil(body["result"]["decided_at"])
+    end
+
+    test "posting free text against a request whose free-text flag is false is refused as malformed",
+         %{conn: conn} do
+      request = choose_request_fixture(%{title: "No free text allowed"})
+
+      resp_conn =
+        post(conn, ~p"/api/v1/requests/#{request.id}/respond", %{"free_text" => "not allowed"})
+
+      body = json_response(resp_conn, 422)
+      assert body["error"]["code"] == "invalid"
+    end
+
+    test "posting a body carrying both a selection and free text goes through choose/3 with both fields",
+         %{conn: conn} do
+      request = choose_request_fixture(%{title: "Both fields", allow_free_text: true})
+
+      resp_conn =
+        post(conn, ~p"/api/v1/requests/#{request.id}/respond", %{
+          "selected_option_ids" => ["opt-a"],
+          "free_text" => "also this"
+        })
+
+      body = json_response(resp_conn, 200)
+
+      assert body["status"] == "completed"
+      assert body["result"]["selected_option_ids"] == ["opt-a"]
+      assert body["result"]["free_text"] == "also this"
+    end
+
+    test "posting free text alone, with no selected_option_ids key, succeeds when free text is allowed",
+         %{conn: conn} do
+      request = choose_request_fixture(%{title: "Free text only", allow_free_text: true})
+
+      resp_conn =
+        post(conn, ~p"/api/v1/requests/#{request.id}/respond", %{"free_text" => "neither"})
+
+      body = json_response(resp_conn, 200)
+
+      assert body["result"]["selected_option_ids"] == []
+      assert body["result"]["free_text"] == "neither"
+    end
+  end
+
   describe "409 vs 422 — the split an agent's retry loop depends on" do
     test "responding twice returns 200 then 409 telling the agent to stop retrying", %{
       conn: conn
@@ -126,8 +186,8 @@ defmodule HumanportWeb.RequestControllerTest do
   end
 
   describe "D-06 — creating an unimplemented type is refused at create, never left pending forever" do
-    test "creating a choose or an escalate request returns 422 naming the type", %{conn: conn} do
-      for type <- ["choose", "escalate"] do
+    test "creating an escalate request returns 422 naming the type", %{conn: conn} do
+      for type <- ["escalate"] do
         resp_conn =
           post(conn, ~p"/api/v1/requests", %{"type" => type, "title" => "Not built yet"})
 
@@ -136,7 +196,7 @@ defmodule HumanportWeb.RequestControllerTest do
         assert body["error"]["code"] == "not_implemented"
 
         assert body["error"]["message"] ==
-                 "HumanPort recorded a #{type} request, but this version answers only ask and approve."
+                 "HumanPort recorded a #{type} request, but this version answers only ask, approve and choose."
       end
     end
   end
