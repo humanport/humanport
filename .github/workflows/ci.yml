@@ -1,0 +1,74 @@
+name: ci
+
+# The same checks `mix precommit` runs locally, in their read-only form:
+# `format --check-formatted` instead of `format`, and `deps.unlock
+# --check-unused` instead of `deps.unlock --unused` — CI must report drift,
+# never silently fix it in a throwaway checkout.
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Kept in step with the Dockerfile's ELIXIR_VERSION / OTP_VERSION.
+  ELIXIR_VERSION: "1.20.3"
+  OTP_VERSION: "29.0.5"
+  MIX_ENV: test
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+
+    services:
+      # Same major version and credentials as compose.yaml's `db` service;
+      # config/test.exs defaults to exactly these.
+      db:
+        image: postgres:18-trixie
+        env:
+          POSTGRES_USER: humanport
+          POSTGRES_PASSWORD: humanport
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U humanport"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+
+      - name: Restore dependency and build cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: mix-${{ runner.os }}-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-${{ hashFiles('mix.lock') }}
+          restore-keys: |
+            mix-${{ runner.os }}-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-
+
+      - name: Fetch dependencies
+        run: mix deps.get
+
+      - name: Check for unused dependencies in mix.lock
+        run: mix deps.unlock --check-unused
+
+      - name: Compile (warnings are errors)
+        run: mix compile --warnings-as-errors
+
+      - name: Check formatting
+        run: mix format --check-formatted
+
+      - name: Run the test suite
+        run: mix test

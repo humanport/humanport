@@ -32,12 +32,14 @@ defmodule HumanportWeb.RequestController do
   Errors render as `{"error": {"code", "message", "details"}}` with the code
   set `not_found | conflict | invalid | not_implemented | internal`.
 
-  This surface is unauthenticated in Phase 1 by design (D-09/D-11) — it
-  resolves an actor (via `HumanportWeb.Plugs.ResolveActor`) so writes carry a
-  recorded, unverified identity, but nothing here checks a token or a
-  session. It MUST NOT be reachable from the internet until the Cloudflare
-  Access gate (Phase 2, OPS-03) sits in front of it; that gate, not this
-  module, is the compensating control (T-01-22).
+  This module checks no token and no session itself (D-09/D-11). Identity is
+  resolved before it runs, by `HumanportWeb.Plugs.ResolveActor` in the `:api`
+  pipeline: by default that is the unverified environment resolver, and it
+  becomes the Cloudflare Access verifier (Phase 2, OPS-03) only when
+  `HUMANPORT_CF_ACCESS_TEAM_DOMAIN` is set — at which point a request without
+  a valid Access token is refused with 401 before reaching any action here.
+  That gate, not this module, is the compensating control (T-01-22), and it
+  authenticates only: nothing here decides who may see or answer a request.
 
   Every action calls `Humanport.Requests` — never builds a changeset and
   never decides a transition itself (§5.2, §54.12).
