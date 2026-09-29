@@ -12,7 +12,9 @@ defmodule Humanport.Application do
         HumanportWeb.Telemetry,
         Humanport.Repo,
         {DNSCluster, query: Application.get_env(:humanport, :dns_cluster_query) || :ignore},
-        {Phoenix.PubSub, name: Humanport.PubSub}
+        {Phoenix.PubSub, name: Humanport.PubSub},
+        # ROUTE-* — after the Repo it stores its jobs in.
+        {Oban, Application.fetch_env!(:humanport, Oban)}
         # Start a worker by calling: Humanport.Worker.start_link(arg)
         # {Humanport.Worker, arg},
       ] ++

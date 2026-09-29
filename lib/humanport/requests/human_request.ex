@@ -127,6 +127,10 @@ defmodule Humanport.Requests.HumanRequest do
       # confirmed recommendation). A choice is a kind of answer; this keeps
       # every hardcoded terminal-state list in the codebase unchanged.
       transition :choose, from: :pending, to: :answered
+      # ROUTE-* — a deadline passed with no decision. Terminal like the
+      # others; `completed_at` is set too, so the terminal-row trigger
+      # protects an expired row exactly as it protects a decided one.
+      transition :expire, from: :pending, to: :expired
     end
   end
 
@@ -144,7 +148,7 @@ defmodule Humanport.Requests.HumanRequest do
 
     read :answered do
       prepare build(
-                filter: expr(state in [:answered, :approved, :rejected]),
+                filter: expr(state in [:answered, :approved, :rejected, :expired]),
                 sort: [completed_at: :desc]
               )
     end
@@ -167,8 +171,12 @@ defmodule Humanport.Requests.HumanRequest do
         :reversible,
         :options,
         :allow_free_text,
-        :max_selections
+        :max_selections,
+        :deadline_at
       ]
+
+      # ROUTE-* — a deadline, when given, must still be ahead.
+      validate {Humanport.Requests.Validations.DeadlineInFuture, []}
 
       # D-12 — the presence of options makes a request a choice. Declared
       # BEFORE the `one_of` validation below so that validation sees the
@@ -263,6 +271,16 @@ defmodule Humanport.Requests.HumanRequest do
       change {Humanport.Requests.Changes.SetDecidedBy, []}
       change set_attribute(:decided_content_hash, arg(:content_hash))
       # NO `change after_action(...)` here — see the moduledoc landmine.
+    end
+
+    # ROUTE-* — run only by `Humanport.Requests.expire/1`, from the
+    # scheduled `ExpireRequest` job. Shaped like the decision actions above:
+    # fully atomic, the transition guard compiled into the UPDATE, so a
+    # human deciding in the same instant wins or loses cleanly — never both.
+    update :expire do
+      change set_attribute(:completed_at, &DateTime.utc_now/0)
+      change transition_state(:expired)
+      change {Humanport.Requests.Changes.SetDecidedBy, []}
     end
   end
 
@@ -370,6 +388,12 @@ defmodule Humanport.Requests.HumanRequest do
     # decision whose fingerprint does not match the request's current,
     # unaltered content. Nil on rows created before SEC-08.
     attribute :content_hash, :string, public?: true
+
+    # ROUTE-* — when set, the request expires (state `:expired`) if nobody
+    # decides it by then. Deliberately NOT part of `content_hash`: it is a
+    # limit on the decision, not content decided on, and adding a field to
+    # the fingerprint would change every existing request's fingerprint.
+    attribute :deadline_at, :utc_datetime_usec, public?: true
     attribute :decided_content_hash, :string, public?: true
 
     create_timestamp :inserted_at

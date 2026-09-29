@@ -23,7 +23,7 @@ defmodule HumanportWeb.AshErrorMapper do
   every caller).
   """
 
-  @terminal_states ~w(answered approved rejected)
+  @terminal_states ~w(answered approved rejected expired)
 
   @type classification ::
           :not_found | :conflict | :invalid | :not_implemented | :forbidden | :internal
@@ -49,6 +49,11 @@ defmodule HumanportWeb.AshErrorMapper do
       # SEC-08 — the decision named content that is not the request's
       # current, unaltered content. A conflict, not a malformed call: the
       # caller must reload and look again, exactly like a lost race.
+      # ROUTE-* — decided after the deadline: the request is, or is about to
+      # be, expired. A conflict, like a lost race.
+      deadline_error = Enum.find(errors, &match?(%Humanport.Requests.Errors.DeadlinePassed{}, &1)) ->
+        {:conflict, Exception.message(deadline_error)}
+
       content_error = Enum.find(errors, &match?(%Humanport.Requests.Errors.ContentChanged{}, &1)) ->
         {:conflict, Exception.message(content_error)}
 

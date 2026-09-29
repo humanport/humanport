@@ -31,7 +31,7 @@ defmodule HumanportWeb.RequestWaiting do
 
   alias Humanport.Requests
 
-  @terminal_states [:answered, :approved, :rejected]
+  @terminal_states [:answered, :approved, :rejected, :expired]
 
   @doc "The per-request PubSub topic — the SAME string the resource's `pub_sub` block publishes on."
   def topic(id), do: "request:#{id}"

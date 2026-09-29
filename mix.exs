@@ -109,7 +109,12 @@ defmodule Humanport.MixProject do
       # release` artifact. Approved by the owner from its Hex registry page on
       # 2026-09-03 (02.1-01-PLAN.md Task 1) — the named fallback (`xema` +
       # `json_xema`) was NOT approved and must not be substituted silently.
-      {:ex_json_schema, "~> 0.11", only: :test}
+      {:ex_json_schema, "~> 0.11", only: :test},
+      # ROUTE-* (deadlines) — durable scheduled work, per the project rule
+      # "Use Oban for durable asynchronous work": a request's expiry is a job
+      # in PostgreSQL, so it survives restarts and runs on whichever node is
+      # up, never a timer held in a BEAM process.
+      {:oban, "~> 2.19"}
     ]
   end
 

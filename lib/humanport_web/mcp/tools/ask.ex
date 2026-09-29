@@ -63,7 +63,14 @@ defmodule HumanportWeb.MCP.Tools.Ask do
           "external_correlation" => %{"type" => "string"},
           "requester_label" => %{"type" => "string"},
           "risk" => %{"type" => "string", "enum" => ["high", "medium", "low"]},
-          "reversible" => %{"type" => "string"}
+          "reversible" => %{"type" => "string"},
+          "deadline_at" => %{
+            "type" => "string",
+            "format" => "date-time",
+            "description" =>
+              "Optional ISO 8601 time. If no human has decided by then, the request " <>
+                "expires: its state becomes expired and it can no longer be answered."
+          }
         },
         "required" => ["title"]
       }

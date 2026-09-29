@@ -440,6 +440,27 @@ service to do it.
 
 ## What happens to a request nobody ever answers
 
-It stays pending indefinitely and keeps appearing in the inbox's open tab.
-This version has no deadlines, no expiry, and no auto-rejection — that is
-intentional, not an oversight; deadlines and escalation are later work.
+Without a deadline, it stays pending indefinitely and keeps appearing in the
+inbox's open tab.
+
+With a deadline, it expires. Any creating call (`POST /api/v1/requests`, or
+the MCP `ask`, `approve` and `choose` tools) may set `deadline_at`, an ISO 8601
+time in the future. If nobody has decided the request by then:
+
+- Its state becomes `expired` (`status: "expired"`, `result: null`), and it
+  moves to the inbox's answered tab with a notice saying it expired.
+- A `request.expired` audit event records it, with the system as the actor.
+- An agent waiting on it (`?wait=N`, or the MCP `await` tool) gets the
+  expired request back at once.
+- Any later answer, approval, rejection or choice is refused with `409`
+  (`conflict`). That also holds in the moment between the deadline and the
+  expiry itself.
+
+The expiry is an Oban job in PostgreSQL, created in the same transaction as
+the request. It survives restarts, and a job that finds the request already
+decided does nothing. The deadline is not part of the request's
+[content fingerprint](#content-binding-what-a-decision-was-made-on): it limits
+the decision, it is not what the decision is about.
+
+Escalation — handing an unanswered request to someone else — is later work.
+It needs routing, which this version does not have.

@@ -12,11 +12,12 @@ defmodule Humanport.Requests.AtomicityTest do
   the next run — this is that test.
 
   Also asserts the transition table itself, so a later phase cannot quietly
-  widen the vocabulary further: exactly four transitions, all from
+  widen the vocabulary further: exactly five transitions, all from
   `:pending`, to `:answered` (twice — `:answer` and CORE-04's `:choose`,
   which deliberately reuses the `:answered` terminal state rather than
-  introducing a `:chosen` one), `:approved` and `:rejected`. `:routed` and
-  `:viewed` are §11 candidate states that belong to Phase 5.
+  introducing a `:chosen` one), `:approved`, `:rejected`, and ROUTE-*'s
+  `:expired` (via `:expire`, run only by the deadline job). `:routed` and
+  `:viewed` are §11 candidate states that belong to later routing work.
   """
 
   use ExUnit.Case, async: true
@@ -45,15 +46,15 @@ defmodule Humanport.Requests.AtomicityTest do
       end
 
       assert Enum.map(update_actions, & &1.name) |> Enum.sort() ==
-               [:answer, :approve, :choose, :reject]
+               [:answer, :approve, :choose, :expire, :reject]
     end
   end
 
   describe "the declared transition table is exactly the CORE-04 set" do
-    test "four transitions, all from :pending, to :answered/:approved/:rejected" do
+    test "five transitions, all from :pending, to :answered/:approved/:rejected/:expired" do
       transitions = StateMachineInfo.state_machine_transitions(HumanRequest)
 
-      assert length(transitions) == 4
+      assert length(transitions) == 5
 
       for transition <- transitions do
         assert List.wrap(transition.from) == [:pending]
@@ -64,21 +65,23 @@ defmodule Humanport.Requests.AtomicityTest do
                  answer: [:answered],
                  approve: [:approved],
                  choose: [:answered],
+                 expire: [:expired],
                  reject: [:rejected]
                ]
                |> Enum.sort()
 
-      # :routed and :viewed are §11 candidate states reserved for Phase 5's
-      # routing work — no transition may target them yet.
+      # :routed and :viewed are §11 candidate states reserved for routing
+      # work — no transition may target them yet.
       all_targets = transitions |> Enum.flat_map(&List.wrap(&1.to))
       refute :routed in all_targets
       refute :viewed in all_targets
     end
 
-    test "the resource's full state set is exactly the four Phase 1 states" do
+    test "the resource's full state set is exactly the four Phase 1 states plus :expired" do
       all_states = StateMachineInfo.state_machine_all_states(HumanRequest)
 
-      assert Enum.sort(all_states) == Enum.sort([:pending, :answered, :approved, :rejected])
+      assert Enum.sort(all_states) ==
+               Enum.sort([:pending, :answered, :approved, :rejected, :expired])
     end
   end
 end
