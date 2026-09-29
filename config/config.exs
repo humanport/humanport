@@ -52,6 +52,14 @@ config :spark,
     "Ash.Domain": [section_order: [:resources, :policies, :authorization, :domain, :execution]]
   ]
 
+# ROUTE-* — deadlines. One queue, small: expiring a request is one atomic
+# UPDATE plus an audit row. Pruner keeps a week of finished jobs for
+# inspection; the audit trail, not oban_jobs, is the record of what happened.
+config :humanport, Oban,
+  repo: Humanport.Repo,
+  queues: [deadlines: 5],
+  plugins: [{Oban.Plugins.Pruner, max_age: 7 * 24 * 60 * 60}]
+
 config :humanport,
   ecto_repos: [Humanport.Repo],
   generators: [timestamp_type: :utc_datetime],

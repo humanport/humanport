@@ -50,3 +50,7 @@ config :phoenix_live_view,
 # Sort query params output of verified routes for robust url comparisons
 config :phoenix,
   sort_verified_routes_query_params: true
+
+# ROUTE-* — jobs are inserted (and asserted on) but never run on their own;
+# tests execute them explicitly with Oban.Testing.perform_job/3.
+config :humanport, Oban, testing: :manual

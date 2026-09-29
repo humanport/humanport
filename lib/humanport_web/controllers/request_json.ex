@@ -43,6 +43,8 @@ defmodule HumanportWeb.RequestJSON do
       # SEC-08 — send it back as `content_hash` on respond to bind a decision
       # to exactly this content.
       content_hash: request.content_hash,
+      # ROUTE-* — when set, the request expires at this time if undecided.
+      deadline_at: request.deadline_at,
       state: request.state,
       status: status(request),
       result: result(request),
@@ -51,10 +53,12 @@ defmodule HumanportWeb.RequestJSON do
     }
   end
 
+  defp status(%HumanRequest{state: :expired}), do: :expired
   defp status(%HumanRequest{completed_at: nil}), do: :pending
   defp status(%HumanRequest{}), do: :completed
 
   defp result(%HumanRequest{completed_at: nil}), do: nil
+  defp result(%HumanRequest{state: :expired}), do: nil
 
   defp result(%HumanRequest{type: :ask} = request) do
     %{

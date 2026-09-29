@@ -169,6 +169,7 @@ defmodule HumanportWeb.RequestLive do
 
     assign(socket,
       request: request,
+      deadline_notice: deadline_notice(request),
       short_id: short,
       confirm_token: token,
       events: timeline_events(events),
@@ -190,6 +191,15 @@ defmodule HumanportWeb.RequestLive do
 
   defp handle_response_error(socket, error, state_key, fallback_state) do
     cond do
+      deadline_passed_error?(error) ->
+        socket
+        |> reload_request()
+        |> assign(state_key, fallback_state)
+        |> put_flash(
+          :error,
+          gettext("This request's deadline has passed. Nothing was recorded.")
+        )
+
       content_changed_error?(error) ->
         # SEC-08 — what was on screen is not the request's current,
         # unaltered content. Reload it so the human sees what is there now.
@@ -228,6 +238,12 @@ defmodule HumanportWeb.RequestLive do
   end
 
   defp content_changed_error?(_error), do: false
+
+  defp deadline_passed_error?(%Ash.Error.Invalid{errors: errors}) do
+    Enum.any?(errors, &match?(%Humanport.Requests.Errors.DeadlinePassed{}, &1))
+  end
+
+  defp deadline_passed_error?(_error), do: false
 
   defp handle_conflict(socket, state_key, fallback_state) do
     case Requests.get_request(socket.assigns.request.id) do
@@ -326,7 +342,27 @@ defmodule HumanportWeb.RequestLive do
   defp event_sentence(%{event_type: "request.chosen"} = event),
     do: actor_identity_sentence(event, gettext("chose an option."))
 
+  # ROUTE-* — the system acted, not a person or agent, so there is no
+  # credential to render.
+  defp event_sentence(%{event_type: "request.expired"}),
+    do: gettext("The deadline passed with no answer; the request expired.")
+
   defp event_sentence(event), do: event.event_type
+
+  # ROUTE-* — `PaneHeader`'s `notice` slot, reserved for exactly this.
+  defp deadline_notice(%{state: :expired, completed_at: expired_at}) do
+    gettext("Expired at %{time}. The deadline passed with no answer; nothing was recorded.",
+      time: format_time(expired_at)
+    )
+  end
+
+  defp deadline_notice(%{completed_at: nil, deadline_at: %DateTime{} = deadline_at}) do
+    gettext("Due by %{time}. After that it expires and can no longer be answered.",
+      time: format_time(deadline_at)
+    )
+  end
+
+  defp deadline_notice(_request), do: nil
 
   defp actor_identity_sentence(event, action_text) do
     assigns = %{
@@ -407,7 +443,7 @@ defmodule HumanportWeb.RequestLive do
   def render(assigns) do
     ~H"""
     <Layouts.app flash={@flash}>
-      <.pane_header form={:detail} short_id={@short_id}></.pane_header>
+      <.pane_header form={:detail} short_id={@short_id} notice={@deadline_notice} />
 
       <div class="flex flex-col gap-6 p-4">
         <h1 class="font-mono text-[length:var(--hp-text-title)] font-extrabold tracking-[-.02em] text-text-primary">
@@ -437,7 +473,7 @@ defmodule HumanportWeb.RequestLive do
         <.request_timeline :if={@events != []} events={@events} />
 
         <.approval_card
-          :if={@request.type == :approve}
+          :if={@request.type == :approve and @request.state != :expired}
           id={"approval-#{@request.id}"}
           confirm_token={@confirm_token}
           value={@confirm_value}
@@ -449,7 +485,7 @@ defmodule HumanportWeb.RequestLive do
         />
 
         <.answer_card
-          :if={@request.type == :ask}
+          :if={@request.type == :ask and @request.state != :expired}
           id={"answer-#{@request.id}"}
           state={@answer_state}
           value={@answer_value}
@@ -460,7 +496,7 @@ defmodule HumanportWeb.RequestLive do
         />
 
         <.choice_card
-          :if={@request.type == :choose}
+          :if={@request.type == :choose and @request.state != :expired}
           id={"choice-#{@request.id}"}
           state={@choice_state}
           options={@request.options || []}

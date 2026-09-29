@@ -53,7 +53,8 @@ defmodule Humanport.Requests do
                new_state: request.state,
                actor: actor,
                metadata: %{content_hash: request.content_hash}
-             }) do
+             }),
+           {:ok, _job} <- schedule_expiry(request) do
         request
       else
         {:error, error} -> Ash.DataLayer.rollback(HumanRequest, error)
@@ -95,7 +96,8 @@ defmodule Humanport.Requests do
   end
 
   def answer(%HumanRequest{} = request, answer, %Actor{} = actor, opts) do
-    with {:ok, content_hash} <- bind_content(request, opts) do
+    with :ok <- check_deadline(request),
+         {:ok, content_hash} <- bind_content(request, opts) do
       Ash.transaction([HumanRequest, Humanport.Audit.Event], fn ->
         with {:ok, answered} <-
                do_answer(request, %{answer: answer, content_hash: content_hash}, actor: actor),
@@ -154,7 +156,8 @@ defmodule Humanport.Requests do
   end
 
   def approve(%HumanRequest{} = request, %Actor{} = actor, opts) do
-    with {:ok, content_hash} <- bind_content(request, opts) do
+    with :ok <- check_deadline(request),
+         {:ok, content_hash} <- bind_content(request, opts) do
       Ash.transaction([HumanRequest, Humanport.Audit.Event], fn ->
         with {:ok, approved} <- do_approve(request, %{content_hash: content_hash}, actor: actor),
              {:ok, _event} <-
@@ -247,7 +250,8 @@ defmodule Humanport.Requests do
   end
 
   def choose(%HumanRequest{} = request, selection, %Actor{} = actor, opts) do
-    with :ok <- validate_selection(request, selection),
+    with :ok <- check_deadline(request),
+         :ok <- validate_selection(request, selection),
          {:ok, content_hash} <- bind_content(request, opts) do
       selected_option_ids = Map.get(selection, :selected_option_ids, [])
       free_text = Map.get(selection, :free_text)
@@ -366,7 +370,8 @@ defmodule Humanport.Requests do
   end
 
   def reject(%HumanRequest{} = request, %Actor{} = actor, opts) do
-    with {:ok, content_hash} <- bind_content(request, opts) do
+    with :ok <- check_deadline(request),
+         {:ok, content_hash} <- bind_content(request, opts) do
       Ash.transaction([HumanRequest, Humanport.Audit.Event], fn ->
         with {:ok, rejected} <- do_reject(request, %{content_hash: content_hash}, actor: actor),
              {:ok, _event} <-
@@ -385,6 +390,65 @@ defmodule Humanport.Requests do
           {:error, error} -> Ash.DataLayer.rollback(HumanRequest, error)
         end
       end)
+    end
+  end
+
+  @doc """
+  ROUTE-* — expires a pending request whose deadline passed, and writes the
+  `request.expired` audit event in one transaction. Called only by the
+  scheduled `Humanport.Requests.Workers.ExpireRequest` job; the acting actor
+  is the system itself, recorded as such.
+  """
+  @spec expire(Ash.Resource.record()) :: {:ok, Ash.Resource.record()} | {:error, term()}
+  def expire(%HumanRequest{} = request) do
+    actor = %Actor{id: nil, type: :system, label: "deadline", verified?: false, method: nil}
+
+    Ash.transaction([HumanRequest, Humanport.Audit.Event], fn ->
+      with {:ok, expired} <-
+             request
+             |> Ash.Changeset.for_update(:expire, %{}, actor: actor)
+             |> Ash.update(),
+           {:ok, _event} <-
+             Humanport.Audit.record("request.expired", %{
+               tenant_id: expired.tenant_id,
+               request_id: expired.id,
+               resource_type: "human_request",
+               resource_id: expired.id,
+               previous_state: request.state,
+               new_state: expired.state,
+               actor: actor,
+               metadata: %{deadline_at: request.deadline_at}
+             }) do
+        expired
+      else
+        {:error, error} -> Ash.DataLayer.rollback(HumanRequest, error)
+      end
+    end)
+  end
+
+  # ROUTE-* — inserted in the same transaction as the request, so a request
+  # with a deadline never exists without the job that ends it.
+  defp schedule_expiry(%HumanRequest{deadline_at: nil}), do: {:ok, nil}
+
+  defp schedule_expiry(%HumanRequest{id: id, deadline_at: deadline_at}) do
+    %{"request_id" => id}
+    |> Humanport.Requests.Workers.ExpireRequest.new(scheduled_at: deadline_at)
+    |> Oban.insert()
+  end
+
+  # ROUTE-* — a decision after the deadline is refused even if the expiry
+  # job has not run yet. `deadline_at` never changes after submit, so the
+  # caller's loaded copy is authoritative; no atomic form is needed.
+  defp check_deadline(%HumanRequest{deadline_at: nil}), do: :ok
+
+  defp check_deadline(%HumanRequest{deadline_at: deadline_at}) do
+    if DateTime.compare(DateTime.utc_now(), deadline_at) == :lt do
+      :ok
+    else
+      {:error,
+       Ash.Error.Invalid.exception(
+         errors: [Humanport.Requests.Errors.DeadlinePassed.exception([])]
+       )}
     end
   end
 

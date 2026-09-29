@@ -70,7 +70,7 @@ defmodule HumanportWeb.MCP.Tools.Await do
   @cancelled_event [:humanport, :mcp, :await, :cancelled]
   # priv/mcp/TRANSPORT.md's pinned keep-alive line, verbatim.
   @keep_alive_comment ":\r\n"
-  @terminal_states [:answered, :approved, :rejected]
+  @terminal_states [:answered, :approved, :rejected, :expired]
 
   @impl true
   def name, do: "await"

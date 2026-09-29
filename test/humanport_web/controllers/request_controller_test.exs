@@ -295,4 +295,48 @@ defmodule HumanportWeb.RequestControllerTest do
       assert {:ok, %{state: :pending}} = Humanport.Requests.get_request(request.id)
     end
   end
+
+  describe "deadlines over plain HTTP (ROUTE-*)" do
+    test "deadline_at round-trips, and a decision after it is a 409", %{conn: conn} do
+      deadline_at = DateTime.utc_now() |> DateTime.add(3600, :second) |> DateTime.to_iso8601()
+
+      created =
+        conn
+        |> post(~p"/api/v1/requests", %{
+          "type" => "approve",
+          "title" => "Deploy 1.4?",
+          "deadline_at" => deadline_at
+        })
+        |> json_response(201)
+
+      assert created["deadline_at"]
+      assert created["status"] == "pending"
+
+      Humanport.Repo.query!("UPDATE human_requests SET deadline_at = $1 WHERE id = $2", [
+        DateTime.add(DateTime.utc_now(), -1, :second),
+        Ecto.UUID.dump!(created["id"])
+      ])
+
+      body =
+        conn
+        |> post(~p"/api/v1/requests/#{created["id"]}/respond", %{"decision" => "approve"})
+        |> json_response(409)
+
+      assert body["error"]["code"] == "conflict"
+      assert body["error"]["message"] =~ "deadline has passed"
+    end
+
+    test "a deadline in the past is a 422", %{conn: conn} do
+      body =
+        conn
+        |> post(~p"/api/v1/requests", %{
+          "type" => "ask",
+          "title" => "Too late",
+          "deadline_at" => "2020-01-01T00:00:00Z"
+        })
+        |> json_response(422)
+
+      assert body["error"]["code"] == "invalid"
+    end
+  end
 end

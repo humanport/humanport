@@ -16,7 +16,7 @@ set -eu
 cd -P -- "$(dirname -- "$0")/.."
 
 BASE_URL="http://localhost:4000"
-TOTAL=17
+TOTAL=18
 API="$BASE_URL/api/v1/requests"
 
 log() {
@@ -364,7 +364,27 @@ out=$(http POST "/api/v1/requests/$KEYED_ID/respond" '{"answer":"A human answers
 assert_status "step 16 — a human answers the keyed request" 200 "$(printf '%s\n' "$out" | head -n1)" "$out"
 
 # --------------------------------------------------------------- step 17 --
-log "Step 17/${TOTAL}: tear down"
+log "Step 17/${TOTAL}: a request with a deadline expires on its own, and a waiting agent sees it"
+DEADLINE=$(jq -rn 'now + 3 | todate')
+out=$(http POST /api/v1/requests "$(jq -cn --arg d "$DEADLINE" '{type: "approve", title: "Expires in 3s", requester_label: "smoke-test", deadline_at: $d}')")
+status=$(printf '%s\n' "$out" | head -n1)
+deadline_body=$(printf '%s\n' "$out" | tail -n +2)
+assert_status "step 17 — create with deadline" 201 "$status" "$deadline_body"
+DEADLINE_ID=$(printf '%s' "$deadline_body" | jq -r '.id')
+
+EXPIRY_START=$(date +%s)
+out=$(http GET "/api/v1/requests/$DEADLINE_ID?wait=30")
+EXPIRY_ELAPSED=$(($(date +%s) - EXPIRY_START))
+expired_body=$(printf '%s\n' "$out" | tail -n +2)
+[ "$(printf '%s' "$expired_body" | jq -r '.status')" = "expired" ] || \
+  fail "step 17 — the request expired" "after ${EXPIRY_ELAPSED}s got: $expired_body"
+[ "$EXPIRY_ELAPSED" -lt 20 ] || fail "step 17 — expiry was prompt" "took ${EXPIRY_ELAPSED}s for a 3s deadline"
+
+out=$(http POST "/api/v1/requests/$DEADLINE_ID/respond" '{"decision":"approve"}')
+assert_status "step 17 — an expired request cannot be approved" 409 "$(printf '%s\n' "$out" | head -n1)" "$out"
+
+# --------------------------------------------------------------- step 18 --
+log "Step 18/${TOTAL}: tear down"
 docker compose down -v --remove-orphans >/dev/null
 
 log "PASS — all ${TOTAL} steps green."
