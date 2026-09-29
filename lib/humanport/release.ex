@@ -227,6 +227,29 @@ defmodule Humanport.Release do
     end)
   end
 
+  @doc """
+  SEC-08 — re-checks request `id`'s content against every fingerprint
+  recorded for it (`Humanport.Requests.verify_content/1`) and prints the
+  result. Raises when the content does not match, so `rpc` exits non-zero.
+  """
+  @spec verify_request(String.t()) :: :ok
+  def verify_request(id) when is_binary(id) do
+    with {:ok, request} <- Humanport.Requests.get_request(id) do
+      case Humanport.Requests.verify_content(request) do
+        :ok ->
+          IO.puts("Request #{id}: content matches #{request.content_hash}.")
+
+        {:error, :no_content_hash} ->
+          IO.puts("Request #{id}: created before content hashing; nothing to verify.")
+
+        {:error, :content_mismatch} ->
+          raise "request #{id}: content does not match its recorded fingerprints"
+      end
+    else
+      {:error, error} -> raise "could not load request #{id}: #{Exception.message(error)}"
+    end
+  end
+
   defp cli_actor do
     %Humanport.Actors.Actor{
       id: nil,

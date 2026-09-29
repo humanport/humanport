@@ -189,25 +189,57 @@ defmodule HumanportWeb.RequestLive do
   # ---- error paths (conflict, save-failure) ------------------------------
 
   defp handle_response_error(socket, error, state_key, fallback_state) do
-    if conflict_error?(error) do
-      case Requests.get_request(socket.assigns.request.id) do
-        {:ok, fresh} ->
-          socket
-          |> load_request(fresh)
-          |> put_flash(:error, conflict_message(fresh))
+    cond do
+      content_changed_error?(error) ->
+        # SEC-08 — what was on screen is not the request's current,
+        # unaltered content. Reload it so the human sees what is there now.
+        socket
+        |> reload_request()
+        |> assign(state_key, fallback_state)
+        |> put_flash(
+          :error,
+          gettext(
+            "This request's content is not what was shown. Nothing was recorded — review it again."
+          )
+        )
 
-        {:error, _error} ->
-          socket
-          |> assign(state_key, fallback_state)
-          |> put_flash(:error, gettext("This request was already answered."))
-      end
-    else
-      socket
-      |> assign(state_key, fallback_state)
-      |> put_flash(
-        :error,
-        gettext("The connection to the server dropped. Nothing was recorded — try again.")
-      )
+      conflict_error?(error) ->
+        handle_conflict(socket, state_key, fallback_state)
+
+      true ->
+        socket
+        |> assign(state_key, fallback_state)
+        |> put_flash(
+          :error,
+          gettext("The connection to the server dropped. Nothing was recorded — try again.")
+        )
+    end
+  end
+
+  defp reload_request(socket) do
+    case Requests.get_request(socket.assigns.request.id) do
+      {:ok, fresh} -> load_request(socket, fresh)
+      {:error, _error} -> socket
+    end
+  end
+
+  defp content_changed_error?(%Ash.Error.Invalid{errors: errors}) do
+    Enum.any?(errors, &match?(%Humanport.Requests.Errors.ContentChanged{}, &1))
+  end
+
+  defp content_changed_error?(_error), do: false
+
+  defp handle_conflict(socket, state_key, fallback_state) do
+    case Requests.get_request(socket.assigns.request.id) do
+      {:ok, fresh} ->
+        socket
+        |> load_request(fresh)
+        |> put_flash(:error, conflict_message(fresh))
+
+      {:error, _error} ->
+        socket
+        |> assign(state_key, fallback_state)
+        |> put_flash(:error, gettext("This request was already answered."))
     end
   end
 

@@ -218,6 +218,38 @@ without a key can be answered by any key.
 What agent keys do **not** add: authorization beyond that one rule (any
 valid key can read and answer any other request), or tenancy.
 
+## Content binding: what a decision was made on
+
+Every request is fingerprinted when it is created. `content_hash` is a
+SHA-256 over exactly what a human is shown: the type, title, description,
+context, subject, options and their limits, stated risk and reversibility,
+and who is asking. The fingerprint is stored on the request and in its
+`request.created` audit event, and returned as `content_hash` on every read.
+
+Every decision (answer, approve, reject, choose) is bound to the fingerprint
+of the content the decider was shown. The decision is recorded as
+`decided_content_hash`, returned in the result as `content_hash`, and
+written into the decision's audit event. A decision goes through only when
+the fingerprint the decider was shown, the fingerprint of the content as
+stored now, and the fingerprint taken at creation all agree. Otherwise it is
+refused with `409` (`conflict`) and nothing is recorded:
+
+- In the inbox, the fingerprint is the one of the content on screen.
+- Over `POST /api/v1/requests/:id/respond`, send the `content_hash` you read
+  to bind the decision to that content. Without it, the decision is bound to
+  the content as stored at that moment.
+
+Nothing in HumanPort ever edits a request's content after it is created, so
+a mismatch means the content was changed outside the application, directly
+in the database. To re-check a request later:
+
+```bash
+docker compose exec app bin/humanport rpc 'Humanport.Release.verify_request("<id>")'
+```
+
+The inbox's typed approval token ("approve c1e5f") is a separate thing. It
+prevents a mis-click; it does not bind anything to the content.
+
 ## `POST /api/v1/requests/:id/respond` body shapes
 
 The body's shape is decided by the request's own type, not by a field
@@ -225,6 +257,9 @@ naming the type explicitly:
 
 - An `ask` request: `{"answer": "<free text>"}`.
 - An `approve` request: `{"decision": "approve"}` or `{"decision": "reject"}`.
+- Any of the shapes here may add `"content_hash"`, the request's own
+  `content_hash` as you read it, to bind the decision to exactly that
+  content — see [Content binding](#content-binding-what-a-decision-was-made-on).
 - A `choose` request (CORE-04): `{"selected_option_ids": ["<id>", ...]}`
   (a list, possibly empty when free text is given instead), and/or
   `{"free_text": "<text>"}` on a request whose `allow_free_text` is `true`.

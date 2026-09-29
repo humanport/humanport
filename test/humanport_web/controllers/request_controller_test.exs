@@ -259,4 +259,40 @@ defmodule HumanportWeb.RequestControllerTest do
       assert created["reversible"] == nil
     end
   end
+
+  describe "content binding over plain HTTP (SEC-08)" do
+    test "the request carries its content_hash, and a matching one binds the decision", %{
+      conn: conn
+    } do
+      request = request_fixture(%{type: :approve, title: "Deploy 1.4?"})
+
+      shown = conn |> get(~p"/api/v1/requests/#{request.id}") |> json_response(200)
+      assert "sha256:" <> _ = shown["content_hash"]
+
+      body =
+        conn
+        |> post(~p"/api/v1/requests/#{request.id}/respond", %{
+          "decision" => "approve",
+          "content_hash" => shown["content_hash"]
+        })
+        |> json_response(200)
+
+      assert body["result"]["content_hash"] == shown["content_hash"]
+    end
+
+    test "a content_hash that does not match is a 409 and records nothing", %{conn: conn} do
+      request = request_fixture(%{type: :approve, title: "Deploy 1.4?"})
+
+      body =
+        conn
+        |> post(~p"/api/v1/requests/#{request.id}/respond", %{
+          "decision" => "approve",
+          "content_hash" => "sha256:" <> String.duplicate("0", 64)
+        })
+        |> json_response(409)
+
+      assert body["error"]["code"] == "conflict"
+      assert {:ok, %{state: :pending}} = Humanport.Requests.get_request(request.id)
+    end
+  end
 end

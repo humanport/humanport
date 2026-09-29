@@ -37,8 +37,8 @@ defmodule Humanport.Requests.HumanRequest do
   trigger is a backstop for every other code path — a console session, a future script, a
   mistake in a later phase. Its error is deliberately ugly on purpose:
   reaching it means something bypassed the domain. It does **not** stand in
-  for §54.8 content-binding (that is the content-hash-bound approval record,
-  SEC-08, Phase 4, not yet built), and it does not stop the table owner from
+  for §54.8 content-binding (that is the content-hash-bound decision record,
+  SEC-08 — see `content_hash` below), and it does not stop the table owner from
   dropping the table or disabling the trigger — the same D-14 limit already
   accepted for the audit trigger.
   """
@@ -191,10 +191,16 @@ defmodule Humanport.Requests.HumanRequest do
 
       change {Humanport.Requests.Changes.SetRequester, []}
       change {Humanport.Requests.Changes.SetTenantId, []}
+      # SEC-08 — last, as a before_action hook, so it fingerprints every
+      # value the row is written with.
+      change {Humanport.Requests.Changes.SetContentHash, []}
     end
 
     update :answer do
       argument :answer, :string, allow_nil?: false
+      # SEC-08 — the fingerprint of the content the decider was shown,
+      # already checked by `Humanport.Requests` before this action runs.
+      argument :content_hash, :string, allow_nil?: true
 
       # Pattern 4(b). This filter is NOT the concurrency guard: in the
       # installed Ash version it does not reach the atomic UPDATE's WHERE
@@ -209,6 +215,7 @@ defmodule Humanport.Requests.HumanRequest do
       change set_attribute(:completed_at, &DateTime.utc_now/0)
       change transition_state(:answered)
       change {Humanport.Requests.Changes.SetDecidedBy, []}
+      change set_attribute(:decided_content_hash, arg(:content_hash))
       # NO `change after_action(...)` here — see the moduledoc landmine.
     end
 
@@ -216,19 +223,25 @@ defmodule Humanport.Requests.HumanRequest do
     # property, same absence of any non-atomic change. Only the target
     # decision/state and the transition differ.
     update :approve do
+      argument :content_hash, :string, allow_nil?: true
+
       change filter(expr(is_nil(completed_at)))
       change set_attribute(:decision, :approved)
       change set_attribute(:completed_at, &DateTime.utc_now/0)
       change transition_state(:approved)
       change {Humanport.Requests.Changes.SetDecidedBy, []}
+      change set_attribute(:decided_content_hash, arg(:content_hash))
     end
 
     update :reject do
+      argument :content_hash, :string, allow_nil?: true
+
       change filter(expr(is_nil(completed_at)))
       change set_attribute(:decision, :rejected)
       change set_attribute(:completed_at, &DateTime.utc_now/0)
       change transition_state(:rejected)
       change {Humanport.Requests.Changes.SetDecidedBy, []}
+      change set_attribute(:decided_content_hash, arg(:content_hash))
     end
 
     # CORE-04 — shaped line for line like `:answer` above, on purpose: same
@@ -240,6 +253,7 @@ defmodule Humanport.Requests.HumanRequest do
     update :choose do
       argument :selected_option_ids, {:array, :string}, allow_nil?: false
       argument :free_text, :string, allow_nil?: true
+      argument :content_hash, :string, allow_nil?: true
 
       change filter(expr(is_nil(completed_at)))
       change set_attribute(:selected_option_ids, arg(:selected_option_ids))
@@ -247,6 +261,7 @@ defmodule Humanport.Requests.HumanRequest do
       change set_attribute(:completed_at, &DateTime.utc_now/0)
       change transition_state(:answered)
       change {Humanport.Requests.Changes.SetDecidedBy, []}
+      change set_attribute(:decided_content_hash, arg(:content_hash))
       # NO `change after_action(...)` here — see the moduledoc landmine.
     end
   end
@@ -347,6 +362,15 @@ defmodule Humanport.Requests.HumanRequest do
     # actor's own record later changes.
     attribute :decided_by, :map, public?: true
     attribute :completed_at, :utc_datetime_usec, public?: true
+
+    # SEC-08 / §54.8 — `content_hash` fingerprints what a human is shown
+    # (`Humanport.Requests.ContentHash`), taken once at submit.
+    # `decided_content_hash` is the fingerprint of the content the decider
+    # was shown, recorded with the decision; `Humanport.Requests` refuses a
+    # decision whose fingerprint does not match the request's current,
+    # unaltered content. Nil on rows created before SEC-08.
+    attribute :content_hash, :string, public?: true
+    attribute :decided_content_hash, :string, public?: true
 
     create_timestamp :inserted_at
     update_timestamp :updated_at

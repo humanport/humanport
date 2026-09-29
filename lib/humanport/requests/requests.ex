@@ -18,6 +18,7 @@ defmodule Humanport.Requests do
   use Ash.Domain
 
   alias Humanport.Actors.Actor
+  alias Humanport.Requests.ContentHash
   alias Humanport.Requests.HumanRequest
 
   resources do
@@ -49,7 +50,7 @@ defmodule Humanport.Requests do
                previous_state: nil,
                new_state: request.state,
                actor: actor,
-               metadata: %{}
+               metadata: %{content_hash: request.content_hash}
              }) do
         request
       else
@@ -68,13 +69,15 @@ defmodule Humanport.Requests do
   rather than letting the mismatch reach the atomic `:answer` action and
   turning a type mismatch into a conflict result.
   """
-  @spec answer(Ash.Resource.record(), String.t(), Actor.t()) ::
+  @spec answer(Ash.Resource.record(), String.t(), Actor.t(), keyword()) ::
           {:ok, Ash.Resource.record()} | {:error, term()}
-  def answer(%HumanRequest{requester_agent_key_id: id}, _answer, %Actor{type: :agent, id: id})
+  def answer(request, answer, actor, opts \\ [])
+
+  def answer(%HumanRequest{requester_agent_key_id: id}, _answer, %Actor{type: :agent, id: id}, _)
       when is_binary(id),
       do: self_answer_error()
 
-  def answer(%HumanRequest{type: :approve}, _answer, %Actor{}) do
+  def answer(%HumanRequest{type: :approve}, _answer, %Actor{}, _opts) do
     {:error,
      Ash.Error.Invalid.exception(
        errors: [
@@ -86,25 +89,28 @@ defmodule Humanport.Requests do
      )}
   end
 
-  def answer(%HumanRequest{} = request, answer, %Actor{} = actor) do
-    Ash.transaction([HumanRequest, Humanport.Audit.Event], fn ->
-      with {:ok, answered} <- do_answer(request, %{answer: answer}, actor: actor),
-           {:ok, _event} <-
-             Humanport.Audit.record("request.responded", %{
-               tenant_id: answered.tenant_id,
-               request_id: answered.id,
-               resource_type: "human_request",
-               resource_id: answered.id,
-               previous_state: request.state,
-               new_state: answered.state,
-               actor: actor,
-               metadata: %{}
-             }) do
-        answered
-      else
-        {:error, error} -> Ash.DataLayer.rollback(HumanRequest, error)
-      end
-    end)
+  def answer(%HumanRequest{} = request, answer, %Actor{} = actor, opts) do
+    with {:ok, content_hash} <- bind_content(request, opts) do
+      Ash.transaction([HumanRequest, Humanport.Audit.Event], fn ->
+        with {:ok, answered} <-
+               do_answer(request, %{answer: answer, content_hash: content_hash}, actor: actor),
+             {:ok, _event} <-
+               Humanport.Audit.record("request.responded", %{
+                 tenant_id: answered.tenant_id,
+                 request_id: answered.id,
+                 resource_type: "human_request",
+                 resource_id: answered.id,
+                 previous_state: request.state,
+                 new_state: answered.state,
+                 actor: actor,
+                 metadata: %{content_hash: content_hash}
+               }) do
+          answered
+        else
+          {:error, error} -> Ash.DataLayer.rollback(HumanRequest, error)
+        end
+      end)
+    end
   end
 
   @doc """
@@ -119,13 +125,15 @@ defmodule Humanport.Requests do
   conflict and tell an agent to stop retrying something that was merely
   malformed.
   """
-  @spec approve(Ash.Resource.record(), Actor.t()) ::
+  @spec approve(Ash.Resource.record(), Actor.t(), keyword()) ::
           {:ok, Ash.Resource.record()} | {:error, term()}
-  def approve(%HumanRequest{requester_agent_key_id: key_id}, %Actor{type: :agent, id: key_id})
+  def approve(request, actor, opts \\ [])
+
+  def approve(%HumanRequest{requester_agent_key_id: key_id}, %Actor{type: :agent, id: key_id}, _)
       when is_binary(key_id),
       do: self_answer_error()
 
-  def approve(%HumanRequest{type: :ask}, %Actor{}) do
+  def approve(%HumanRequest{type: :ask}, %Actor{}, _opts) do
     {:error,
      Ash.Error.Invalid.exception(
        errors: [
@@ -137,25 +145,27 @@ defmodule Humanport.Requests do
      )}
   end
 
-  def approve(%HumanRequest{} = request, %Actor{} = actor) do
-    Ash.transaction([HumanRequest, Humanport.Audit.Event], fn ->
-      with {:ok, approved} <- do_approve(request, actor: actor),
-           {:ok, _event} <-
-             Humanport.Audit.record("request.approved", %{
-               tenant_id: approved.tenant_id,
-               request_id: approved.id,
-               resource_type: "human_request",
-               resource_id: approved.id,
-               previous_state: request.state,
-               new_state: approved.state,
-               actor: actor,
-               metadata: %{}
-             }) do
-        approved
-      else
-        {:error, error} -> Ash.DataLayer.rollback(HumanRequest, error)
-      end
-    end)
+  def approve(%HumanRequest{} = request, %Actor{} = actor, opts) do
+    with {:ok, content_hash} <- bind_content(request, opts) do
+      Ash.transaction([HumanRequest, Humanport.Audit.Event], fn ->
+        with {:ok, approved} <- do_approve(request, %{content_hash: content_hash}, actor: actor),
+             {:ok, _event} <-
+               Humanport.Audit.record("request.approved", %{
+                 tenant_id: approved.tenant_id,
+                 request_id: approved.id,
+                 resource_type: "human_request",
+                 resource_id: approved.id,
+                 previous_state: request.state,
+                 new_state: approved.state,
+                 actor: actor,
+                 metadata: %{content_hash: content_hash}
+               }) do
+          approved
+        else
+          {:error, error} -> Ash.DataLayer.rollback(HumanRequest, error)
+        end
+      end)
+    end
   end
 
   @doc """
@@ -200,17 +210,20 @@ defmodule Humanport.Requests do
   back-filled, because the label it showed no longer exists anywhere once
   the caller renames it.
   """
-  @spec choose(Ash.Resource.record(), map(), Actor.t()) ::
+  @spec choose(Ash.Resource.record(), map(), Actor.t(), keyword()) ::
           {:ok, Ash.Resource.record()} | {:error, term()}
+  def choose(request, selection, actor, opts \\ [])
+
   def choose(
         %HumanRequest{requester_agent_key_id: key_id},
         _selection,
-        %Actor{type: :agent, id: key_id}
+        %Actor{type: :agent, id: key_id},
+        _opts
       )
       when is_binary(key_id),
       do: self_answer_error()
 
-  def choose(%HumanRequest{type: type}, _selection, %Actor{}) when type != :choose do
+  def choose(%HumanRequest{type: type}, _selection, %Actor{}, _opts) when type != :choose do
     {:error,
      Ash.Error.Invalid.exception(
        errors: [
@@ -222,8 +235,9 @@ defmodule Humanport.Requests do
      )}
   end
 
-  def choose(%HumanRequest{} = request, selection, %Actor{} = actor) do
-    with :ok <- validate_selection(request, selection) do
+  def choose(%HumanRequest{} = request, selection, %Actor{} = actor, opts) do
+    with :ok <- validate_selection(request, selection),
+         {:ok, content_hash} <- bind_content(request, opts) do
       selected_option_ids = Map.get(selection, :selected_option_ids, [])
       free_text = Map.get(selection, :free_text)
 
@@ -231,7 +245,11 @@ defmodule Humanport.Requests do
         with {:ok, chosen} <-
                do_choose(
                  request,
-                 %{selected_option_ids: selected_option_ids, free_text: free_text},
+                 %{
+                   selected_option_ids: selected_option_ids,
+                   free_text: free_text,
+                   content_hash: content_hash
+                 },
                  actor: actor
                ),
              {:ok, _event} <-
@@ -245,7 +263,8 @@ defmodule Humanport.Requests do
                  actor: actor,
                  metadata: %{
                    selected_options: selected_options_metadata(request, selected_option_ids),
-                   free_text_given: not is_nil(free_text)
+                   free_text_given: not is_nil(free_text),
+                   content_hash: content_hash
                  }
                }) do
           chosen
@@ -312,13 +331,15 @@ defmodule Humanport.Requests do
   Rejects a `HumanRequest` and writes the `request.rejected` audit event in
   one transaction. See `approve/2` for the type/action guard rationale.
   """
-  @spec reject(Ash.Resource.record(), Actor.t()) ::
+  @spec reject(Ash.Resource.record(), Actor.t(), keyword()) ::
           {:ok, Ash.Resource.record()} | {:error, term()}
-  def reject(%HumanRequest{requester_agent_key_id: key_id}, %Actor{type: :agent, id: key_id})
+  def reject(request, actor, opts \\ [])
+
+  def reject(%HumanRequest{requester_agent_key_id: key_id}, %Actor{type: :agent, id: key_id}, _)
       when is_binary(key_id),
       do: self_answer_error()
 
-  def reject(%HumanRequest{type: :ask}, %Actor{}) do
+  def reject(%HumanRequest{type: :ask}, %Actor{}, _opts) do
     {:error,
      Ash.Error.Invalid.exception(
        errors: [
@@ -330,25 +351,91 @@ defmodule Humanport.Requests do
      )}
   end
 
-  def reject(%HumanRequest{} = request, %Actor{} = actor) do
-    Ash.transaction([HumanRequest, Humanport.Audit.Event], fn ->
-      with {:ok, rejected} <- do_reject(request, actor: actor),
-           {:ok, _event} <-
-             Humanport.Audit.record("request.rejected", %{
-               tenant_id: rejected.tenant_id,
-               request_id: rejected.id,
-               resource_type: "human_request",
-               resource_id: rejected.id,
-               previous_state: request.state,
-               new_state: rejected.state,
-               actor: actor,
-               metadata: %{}
-             }) do
-        rejected
-      else
-        {:error, error} -> Ash.DataLayer.rollback(HumanRequest, error)
-      end
+  def reject(%HumanRequest{} = request, %Actor{} = actor, opts) do
+    with {:ok, content_hash} <- bind_content(request, opts) do
+      Ash.transaction([HumanRequest, Humanport.Audit.Event], fn ->
+        with {:ok, rejected} <- do_reject(request, %{content_hash: content_hash}, actor: actor),
+             {:ok, _event} <-
+               Humanport.Audit.record("request.rejected", %{
+                 tenant_id: rejected.tenant_id,
+                 request_id: rejected.id,
+                 resource_type: "human_request",
+                 resource_id: rejected.id,
+                 previous_state: request.state,
+                 new_state: rejected.state,
+                 actor: actor,
+                 metadata: %{content_hash: content_hash}
+               }) do
+          rejected
+        else
+          {:error, error} -> Ash.DataLayer.rollback(HumanRequest, error)
+        end
+      end)
+    end
+  end
+
+  @doc """
+  SEC-08 — re-checks a request's content against every fingerprint recorded
+  for it: `content_hash` (taken at submit), the `request.created` audit
+  event's copy of it (append-only), and `decided_content_hash` once decided.
+  `:ok` when the content as stored today is exactly the content that was
+  fingerprinted and decided on; `{:error, :content_mismatch}` when anything
+  differs — the content, or a stored fingerprint, was altered outside the
+  domain. `{:error, :no_content_hash}` for a request created before SEC-08.
+  """
+  @spec verify_content(Ash.Resource.record()) ::
+          :ok | {:error, :no_content_hash | :content_mismatch}
+  def verify_content(%HumanRequest{content_hash: nil}), do: {:error, :no_content_hash}
+
+  def verify_content(%HumanRequest{} = request) do
+    fingerprint = ContentHash.compute(request)
+
+    recorded =
+      Enum.reject(
+        [request.content_hash, request.decided_content_hash, created_event_hash(request.id)],
+        &is_nil/1
+      )
+
+    if Enum.all?(recorded, &(&1 == fingerprint)), do: :ok, else: {:error, :content_mismatch}
+  end
+
+  defp created_event_hash(request_id) do
+    {:ok, events} = Humanport.Audit.list_events_for_request(request_id)
+
+    Enum.find_value(events, fn event ->
+      event.event_type == "request.created" &&
+        (event.metadata["content_hash"] || event.metadata[:content_hash])
     end)
+  end
+
+  # SEC-08 / §54.8 — binds a decision to the content the decider was shown.
+  # `shown` is the decider's own loaded copy, so by default the fingerprint
+  # presented is the one of what they were looking at; a boundary that
+  # carries the fingerprint separately (HTTP's `content_hash` field) passes
+  # it in `opts`. The request is re-read here and refingerprinted: a decision
+  # goes through only when the presented fingerprint, the fingerprint of the
+  # content as stored now, and the fingerprint taken at submit all agree.
+  # Content is never changed by any action, so a mismatch means it was
+  # altered outside the domain, or the decider named other content — either
+  # way nothing is recorded. Checked before the transaction opens, like the
+  # guards above, so no decision action loses its atomicity.
+  defp bind_content(%HumanRequest{content_hash: nil}, _opts), do: {:ok, nil}
+
+  defp bind_content(%HumanRequest{} = shown, opts) do
+    presented = Keyword.get(opts, :content_hash) || shown.content_hash
+
+    with {:ok, current} <- get_request(shown.id) do
+      fingerprint = ContentHash.compute(current)
+
+      if presented == fingerprint and current.content_hash == fingerprint do
+        {:ok, fingerprint}
+      else
+        {:error,
+         Ash.Error.Invalid.exception(
+           errors: [Humanport.Requests.Errors.ContentChanged.exception([])]
+         )}
+      end
+    end
   end
 
   # SEC-04/05 — an agent key may answer other requests, never its own: a key
@@ -373,9 +460,9 @@ defmodule Humanport.Requests do
     |> Ash.update()
   end
 
-  defp do_approve(request, opts) do
+  defp do_approve(request, params, opts) do
     request
-    |> Ash.Changeset.for_update(:approve, %{}, opts)
+    |> Ash.Changeset.for_update(:approve, params, opts)
     |> Ash.update()
   end
 
@@ -385,9 +472,9 @@ defmodule Humanport.Requests do
     |> Ash.update()
   end
 
-  defp do_reject(request, opts) do
+  defp do_reject(request, params, opts) do
     request
-    |> Ash.Changeset.for_update(:reject, %{}, opts)
+    |> Ash.Changeset.for_update(:reject, params, opts)
     |> Ash.update()
   end
 end
