@@ -36,7 +36,7 @@ defmodule Humanport.Agents.AgentKey do
     end
 
     create :issue do
-      accept [:label]
+      accept [:label, :role]
 
       change {Humanport.Agents.Changes.GenerateToken, []}
       change {Humanport.Requests.Changes.SetTenantId, []}
@@ -66,6 +66,15 @@ defmodule Humanport.Agents.AgentKey do
     attribute :prefix, :string, allow_nil?: false, public?: true
     attribute :secret_hash, :string, allow_nil?: false, sensitive?: true
     attribute :revoked_at, :utc_datetime_usec, public?: true
+
+    # SEC-02 — what this key may do (see `Humanport.Actors.Actor`'s `role`).
+    # Least privilege by default: a key that should answer has to be issued
+    # as one.
+    attribute :role, :atom,
+      constraints: [one_of: [:requester, :responder, :admin]],
+      default: :requester,
+      allow_nil?: false,
+      public?: true
 
     create_timestamp :inserted_at
     update_timestamp :updated_at

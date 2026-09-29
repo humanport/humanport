@@ -38,6 +38,8 @@ defmodule Humanport.Requests do
   one transaction.
   """
   @spec submit(map(), Actor.t()) :: {:ok, Ash.Resource.record()} | {:error, term()}
+  def submit(_params, %Actor{type: :agent, role: :responder}), do: role_error(:responder, :submit)
+
   def submit(params, %Actor{} = actor) do
     Ash.transaction([HumanRequest, Humanport.Audit.Event], fn ->
       with {:ok, request} <- do_submit(params, actor),
@@ -72,6 +74,9 @@ defmodule Humanport.Requests do
   @spec answer(Ash.Resource.record(), String.t(), Actor.t(), keyword()) ::
           {:ok, Ash.Resource.record()} | {:error, term()}
   def answer(request, answer, actor, opts \\ [])
+
+  def answer(_request, _answer, %Actor{type: :agent, role: :requester}, _),
+    do: role_error(:requester, :decide)
 
   def answer(%HumanRequest{requester_agent_key_id: id}, _answer, %Actor{type: :agent, id: id}, _)
       when is_binary(id),
@@ -128,6 +133,9 @@ defmodule Humanport.Requests do
   @spec approve(Ash.Resource.record(), Actor.t(), keyword()) ::
           {:ok, Ash.Resource.record()} | {:error, term()}
   def approve(request, actor, opts \\ [])
+
+  def approve(_request, %Actor{type: :agent, role: :requester}, _),
+    do: role_error(:requester, :decide)
 
   def approve(%HumanRequest{requester_agent_key_id: key_id}, %Actor{type: :agent, id: key_id}, _)
       when is_binary(key_id),
@@ -213,6 +221,9 @@ defmodule Humanport.Requests do
   @spec choose(Ash.Resource.record(), map(), Actor.t(), keyword()) ::
           {:ok, Ash.Resource.record()} | {:error, term()}
   def choose(request, selection, actor, opts \\ [])
+
+  def choose(_request, _selection, %Actor{type: :agent, role: :requester}, _),
+    do: role_error(:requester, :decide)
 
   def choose(
         %HumanRequest{requester_agent_key_id: key_id},
@@ -335,6 +346,9 @@ defmodule Humanport.Requests do
           {:ok, Ash.Resource.record()} | {:error, term()}
   def reject(request, actor, opts \\ [])
 
+  def reject(_request, %Actor{type: :agent, role: :requester}, _),
+    do: role_error(:requester, :decide)
+
   def reject(%HumanRequest{requester_agent_key_id: key_id}, %Actor{type: :agent, id: key_id}, _)
       when is_binary(key_id),
       do: self_answer_error()
@@ -443,6 +457,18 @@ defmodule Humanport.Requests do
   # Checked before any transaction opens, like the type guards above — the
   # requester never changes on a request, so this is a caller error, not a
   # race, and needs no atomic form.
+  # SEC-02 — an agent key acts only within its role (see
+  # `Humanport.Actors.Actor`). Checked first, before any other guard or
+  # transaction, so a key that may not act learns nothing else.
+  defp role_error(role, operation) do
+    {:error,
+     Ash.Error.Forbidden.exception(
+       errors: [
+         Humanport.Requests.Errors.RoleNotPermitted.exception(role: role, operation: operation)
+       ]
+     )}
+  end
+
   defp self_answer_error do
     {:error,
      Ash.Error.Forbidden.exception(errors: [Humanport.Requests.Errors.SelfAnswer.exception([])])}

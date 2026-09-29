@@ -24,18 +24,18 @@ defmodule Humanport.Agents do
   end
 
   @doc """
-  Issues a new key labelled `label` and writes the `agent_key.issued` audit
-  event in one transaction. Returns `{:ok, key, token}` — `token` is the
+  Issues a new key labelled `label` with `role` (default `:requester`) and
+  writes the `agent_key.issued` audit event in one transaction. Returns `{:ok, key, token}` — `token` is the
   only copy of the plaintext that will ever exist.
   """
-  @spec issue_key(String.t(), Actor.t()) ::
+  @spec issue_key(String.t(), Actor.t(), :requester | :responder | :admin) ::
           {:ok, Ash.Resource.record(), String.t()} | {:error, term()}
-  def issue_key(label, %Actor{} = actor) do
+  def issue_key(label, %Actor{} = actor, role \\ :requester) do
     result =
       Ash.transaction([AgentKey, Humanport.Audit.Event], fn ->
         with {:ok, key} <-
                AgentKey
-               |> Ash.Changeset.for_create(:issue, %{label: label}, actor: actor)
+               |> Ash.Changeset.for_create(:issue, %{label: label, role: role}, actor: actor)
                |> Ash.create(),
              {:ok, _event} <- record_event("agent_key.issued", key, nil, "active", actor) do
           key
@@ -88,7 +88,14 @@ defmodule Humanport.Agents do
   @doc "The verified actor an authenticated key acts as."
   @spec actor_for(Ash.Resource.record()) :: Actor.t()
   def actor_for(%AgentKey{} = key) do
-    %Actor{id: key.id, type: :agent, label: key.label, verified?: true, method: :api_key}
+    %Actor{
+      id: key.id,
+      type: :agent,
+      label: key.label,
+      verified?: true,
+      method: :api_key,
+      role: key.role
+    }
   end
 
   @doc false
@@ -126,7 +133,7 @@ defmodule Humanport.Agents do
       previous_state: previous_state,
       new_state: new_state,
       actor: actor,
-      metadata: %{label: key.label, prefix: key.prefix}
+      metadata: %{label: key.label, prefix: key.prefix, role: key.role}
     })
   end
 end

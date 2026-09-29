@@ -11,10 +11,16 @@ defmodule Humanport.Actors.Actor do
   `verified?: true, method: :sso` for the human actor; the agent-supplied
   `requester_label` stays unverified until Phase 3 (SEC-04/05) replaces it with
   a real revocable credential.
+
+  `role` is set only for an agent-key actor (SEC-02): `:requester` may create
+  and read requests, `:responder` may read and decide them, `:admin` may do
+  both. Every other actor has `role: nil` and is not restricted by it — a
+  human reaching the inbox or the API has already passed whatever gate the
+  deployment put in front of it.
   """
 
   @enforce_keys [:type, :label, :verified?]
-  defstruct id: nil, type: nil, label: nil, verified?: false, method: nil
+  defstruct id: nil, type: nil, label: nil, verified?: false, method: nil, role: nil
 
   @type actor_type :: :human | :agent | :service | :system
 
@@ -23,6 +29,7 @@ defmodule Humanport.Actors.Actor do
           type: actor_type(),
           label: String.t(),
           verified?: boolean(),
-          method: atom() | nil
+          method: atom() | nil,
+          role: :requester | :responder | :admin | nil
         }
 end

@@ -187,6 +187,7 @@ Issue, list and revoke keys on the running instance:
 
 ```bash
 docker compose exec app bin/humanport rpc 'Humanport.Release.issue_agent_key("deploy-bot")'
+docker compose exec app bin/humanport rpc 'Humanport.Release.issue_agent_key("reviewer", "responder")'
 docker compose exec app bin/humanport rpc 'Humanport.Release.list_agent_keys()'
 docker compose exec app bin/humanport rpc 'Humanport.Release.revoke_agent_key("<id>")'
 ```
@@ -208,6 +209,20 @@ How a key is checked:
   not instead of it: a request still needs a valid Access token to get in at
   all.
 
+**Every key has a role**, set when it is issued:
+
+| Role | May create requests | May read requests | May answer, approve, reject, choose |
+|---|---|---|---|
+| `requester` (default) | yes | yes | no |
+| `responder` | no | yes | yes |
+| `admin` | yes | yes | yes |
+
+A key acting outside its role is refused with `403` (`forbidden`); over MCP
+the tool call returns an error result instead. A key that should answer
+requests has to be issued as `responder` or `admin`. Roles restrict agent
+keys only: a human in the inbox, or a caller without a key, is not limited
+by them.
+
 **A key can answer other requests, never its own.** A key may respond to
 requests over `POST /api/v1/requests/:id/respond`, and is then recorded in
 `decided_by` as a verified agent. It may not answer, approve, reject or
@@ -215,8 +230,9 @@ choose on a request it created itself — that is refused with `403`
 (`forbidden`), so an agent cannot approve its own action. Requests created
 without a key can be answered by any key.
 
-What agent keys do **not** add: authorization beyond that one rule (any
-valid key can read and answer any other request), or tenancy.
+What agent keys do **not** add: authorization beyond roles and that one rule
+(a `responder` or `admin` key can answer any request but its own), or
+tenancy.
 
 ## Content binding: what a decision was made on
 
