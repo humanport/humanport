@@ -90,27 +90,3 @@ jobs:
       - name: Application logs on failure
         if: failure()
         run: docker compose logs app
-
-  # TEMPORARY — resolves the new oban dependency into mix.lock and generates
-  # the deadline migration and resource snapshot with the real toolchain,
-  # then prints them; removed again before merge.
-  codegen:
-    runs-on: ubuntu-24.04
-    env:
-      MIX_ENV: dev
-    steps:
-      - uses: actions/checkout@v4
-      - uses: erlef/setup-beam@v1
-        with:
-          elixir-version: ${{ env.ELIXIR_VERSION }}
-          otp-version: ${{ env.OTP_VERSION }}
-      - run: mix deps.get
-      - run: mix ash.codegen add_deadlines
-      - name: Print generated files
-        run: |
-          git add -A priv mix.lock
-          git diff --cached --name-status
-          echo "BEGIN_CODEGEN_TGZ"
-          git diff --cached --name-only | tar czf - -T - | base64 -w 0
-          echo
-          echo "END_CODEGEN_TGZ"
