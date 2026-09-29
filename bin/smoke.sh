@@ -328,7 +328,9 @@ get_status=$(curl -sS -o /dev/null -w '%{http_code}' "$BASE_URL/mcp")
 
 # --------------------------------------------------------------- step 16 --
 log "Step 16/${TOTAL}: an agent key makes the MCP requester verified, and cannot answer itself"
-issued=$(docker compose exec -T app bin/humanport rpc 'Humanport.Release.issue_agent_key("smoke-bot")' 2>&1) || \
+# An admin key may both create and answer, so the only rule that can refuse
+# it answering its own request below is the self-answer rule.
+issued=$(docker compose exec -T app bin/humanport rpc 'Humanport.Release.issue_agent_key("smoke-bot", "admin")' 2>&1) || \
   fail "step 16 — issue an agent key" "$issued"
 AGENT_KEY=$(printf '%s\n' "$issued" | grep -o 'hp_[A-Za-z0-9_-]*' | head -n1)
 [ -n "$AGENT_KEY" ] || fail "step 16 — issue an agent key" "no token in: $issued"
@@ -347,9 +349,12 @@ assert_status "step 16 — keyed tools/call ask" 200 "$status" "$keyed_body"
   fail "step 16 — keyed request is named by its key" "got: $keyed_body"
 KEYED_ID=$(printf '%s' "$keyed_body" | jq -r '.result.structuredContent.id')
 
-self_status=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$BASE_URL/api/v1/requests/$KEYED_ID/respond" \
+self_out=$(curl -sS -w '\n%{http_code}' -X POST "$BASE_URL/api/v1/requests/$KEYED_ID/respond" \
   -H 'content-type: application/json' -H "authorization: Bearer $AGENT_KEY" -d '{"answer":"I approve of myself"}')
-[ "$self_status" = "403" ] || fail "step 16 — a key cannot answer its own request" "expected HTTP 403, got HTTP $self_status"
+self_status=$(printf '%s\n' "$self_out" | tail -n1)
+[ "$self_status" = "403" ] || fail "step 16 — a key cannot answer its own request" "expected HTTP 403, got: $self_out"
+printf '%s' "$self_out" | grep -q 'created itself' || \
+  fail "step 16 — refused by the self-answer rule" "got: $self_out"
 
 bad_status=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$BASE_URL/api/v1/requests" \
   -H 'content-type: application/json' -H 'authorization: Bearer hp_000000000000_nope' -d '{"type":"ask","title":"x"}')

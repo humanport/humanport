@@ -175,20 +175,31 @@ defmodule Humanport.Release do
 
   @doc """
   SEC-04/05 — issues an agent key labelled `label` and prints its token.
-  The token is shown exactly once; only its digest is stored. Run it on the
-  live node:
+  The token is shown exactly once; only its digest is stored. `role` is
+  `"requester"` (default: create and read requests), `"responder"` (read and
+  answer them) or `"admin"` (both) — SEC-02. Run it on the live node:
 
       docker compose exec app bin/humanport rpc 'Humanport.Release.issue_agent_key("ci-bot")'
+      docker compose exec app bin/humanport rpc 'Humanport.Release.issue_agent_key("reviewer", "responder")'
 
   The issuance is audited with a `:system` actor labelled `"release-cli"`.
   """
-  @spec issue_agent_key(String.t()) :: :ok
-  def issue_agent_key(label) when is_binary(label) do
-    case Humanport.Agents.issue_key(label, cli_actor()) do
+  @spec issue_agent_key(String.t(), String.t()) :: :ok
+  def issue_agent_key(label, role \\ "requester") when is_binary(label) and is_binary(role) do
+    role =
+      case role do
+        "requester" -> :requester
+        "responder" -> :responder
+        "admin" -> :admin
+        other -> raise "unknown role #{inspect(other)}: use requester, responder or admin"
+      end
+
+    case Humanport.Agents.issue_key(label, cli_actor(), role) do
       {:ok, key, token} ->
         IO.puts("""
         Agent key issued.
           label:  #{key.label}
+          role:   #{key.role}
           id:     #{key.id}
           token:  #{token}
 
@@ -223,7 +234,7 @@ defmodule Humanport.Release do
 
     Enum.each(keys, fn key ->
       status = if key.revoked_at, do: "revoked #{key.revoked_at}", else: "active"
-      IO.puts("#{key.id}  hp_#{key.prefix}_…  #{status}  #{key.label}")
+      IO.puts("#{key.id}  hp_#{key.prefix}_…  #{key.role}  #{status}  #{key.label}")
     end)
   end
 

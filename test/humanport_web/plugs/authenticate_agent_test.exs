@@ -20,8 +20,8 @@ defmodule HumanportWeb.Plugs.AuthenticateAgentTest do
 
   @cli %Actor{id: nil, type: :system, label: "release-cli", verified?: false, method: nil}
 
-  defp issue(label) do
-    {:ok, key, token} = Agents.issue_key(label, @cli)
+  defp issue(label, role \\ :requester) do
+    {:ok, key, token} = Agents.issue_key(label, @cli, role)
     {key, token}
   end
 
@@ -113,7 +113,9 @@ defmodule HumanportWeb.Plugs.AuthenticateAgentTest do
 
   describe "answering with a key" do
     test "a key cannot answer, approve, reject or choose on its own request", %{conn: conn} do
-      {_key, token} = issue("deploy-bot")
+      # An admin key may both create and answer, so the only thing refusing
+      # it here is the self-answer rule.
+      {_key, token} = issue("deploy-bot", :admin)
 
       for {params, body} <- [
             {%{type: "ask", title: "Which one?"}, %{answer: "this one"}},
@@ -131,14 +133,16 @@ defmodule HumanportWeb.Plugs.AuthenticateAgentTest do
           |> put_req_header("content-type", "application/json")
           |> post(~p"/api/v1/requests/#{id}/respond", Jason.encode!(body))
 
-        assert json_response(resp, 403)["error"]["code"] == "forbidden"
+        error = json_response(resp, 403)["error"]
+        assert error["code"] == "forbidden"
+        assert error["message"] =~ "created itself"
         assert {:ok, %{state: :pending}} = Humanport.Requests.get_request(id)
       end
     end
 
     test "a different key can answer, and is recorded as a verified agent", %{conn: conn} do
       {_asker, asker_token} = issue("deploy-bot")
-      {_answerer, answerer_token} = issue("review-bot")
+      {_answerer, answerer_token} = issue("review-bot", :responder)
 
       id =
         conn
@@ -162,7 +166,7 @@ defmodule HumanportWeb.Plugs.AuthenticateAgentTest do
     end
 
     test "a key can answer a request nobody's key created", %{conn: conn} do
-      {_key, token} = issue("review-bot")
+      {_key, token} = issue("review-bot", :responder)
       request = request_fixture(%{type: :approve, title: "Ship it?"})
 
       resp =
@@ -172,6 +176,80 @@ defmodule HumanportWeb.Plugs.AuthenticateAgentTest do
         |> post(~p"/api/v1/requests/#{request.id}/respond", Jason.encode!(%{decision: "reject"}))
 
       assert json_response(resp, 200)["result"]["decision"] == "rejected"
+    end
+  end
+
+  describe "roles (SEC-02)" do
+    test "a requester key cannot answer, approve, reject or choose", %{conn: conn} do
+      {_key, token} = issue("deploy-bot", :requester)
+
+      for {type, body} <- [
+            {:ask, %{answer: "this one"}},
+            {:approve, %{decision: "approve"}},
+            {:approve, %{decision: "reject"}},
+            {:choose, %{selected_option_ids: ["opt-a"]}}
+          ] do
+        request =
+          if type == :choose,
+            do: choose_request_fixture(),
+            else: request_fixture(%{type: type, title: "Ship it?"})
+
+        error =
+          conn
+          |> with_key(token)
+          |> put_req_header("content-type", "application/json")
+          |> post(~p"/api/v1/requests/#{request.id}/respond", Jason.encode!(body))
+          |> json_response(403)
+          |> Map.fetch!("error")
+
+        assert error["code"] == "forbidden"
+        assert error["message"] =~ "requester role cannot answer"
+        assert {:ok, %{state: :pending}} = Humanport.Requests.get_request(request.id)
+      end
+    end
+
+    test "a responder key cannot create requests", %{conn: conn} do
+      {_key, token} = issue("review-bot", :responder)
+
+      error =
+        conn
+        |> with_key(token)
+        |> create_request(%{type: "ask", title: "Ship it?"})
+        |> json_response(403)
+        |> Map.fetch!("error")
+
+      assert error["code"] == "forbidden"
+      assert error["message"] =~ "responder role cannot create"
+      assert {:ok, []} = Humanport.Requests.list_requests()
+    end
+
+    test "a responder key can still read a request", %{conn: conn} do
+      {_key, token} = issue("review-bot", :responder)
+      request = request_fixture(%{title: "Ship it?"})
+
+      assert conn
+             |> with_key(token)
+             |> get(~p"/api/v1/requests/#{request.id}")
+             |> json_response(200)
+             |> Map.fetch!("id") == request.id
+    end
+
+    test "over MCP, a responder key's ask is a tool error, not a transport error", %{conn: conn} do
+      {_key, token} = issue("review-bot", :responder)
+      body = McpFixtures.call_tool_request("call-1", "ask", %{"title" => "Which region?"})
+
+      response =
+        conn
+        |> with_key(token)
+        |> put_mcp_headers(body)
+        |> post(~p"/mcp", Jason.encode!(body))
+        |> json_response(200)
+
+      McpSchema.assert_valid!(response["result"], "CallToolResult")
+      assert response["result"]["isError"] == true
+      assert [%{"text" => text}] = response["result"]["content"]
+      assert text =~ "responder role cannot create"
+      assert {:ok, []} = Humanport.Requests.list_requests()
     end
   end
 

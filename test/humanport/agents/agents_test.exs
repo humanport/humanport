@@ -60,6 +60,22 @@ defmodule Humanport.AgentsTest do
       refute inspect(event.metadata) =~ token
     end
 
+    test "a key is a requester unless issued with another role" do
+      {:ok, default_key, _} = Agents.issue_key("ci-bot", @cli)
+      {:ok, admin_key, _} = Agents.issue_key("ops-bot", @cli, :admin)
+
+      assert default_key.role == :requester
+      assert admin_key.role == :admin
+      assert Agents.actor_for(admin_key).role == :admin
+
+      assert [event] = audit_rows(admin_key.id)
+      assert event.metadata["role"] == "admin"
+    end
+
+    test "refuses an unknown role" do
+      assert {:error, _} = Agents.issue_key("ci-bot", @cli, :root)
+    end
+
     test "refuses a blank label and writes nothing" do
       assert {:error, _} = Agents.issue_key("   ", @cli)
       assert {:ok, []} = Agents.list_agent_keys()
