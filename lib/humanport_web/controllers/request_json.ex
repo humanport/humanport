@@ -40,6 +40,9 @@ defmodule HumanportWeb.RequestJSON do
       max_selections: request.max_selections,
       # D-22 — both, at different resolutions. `status` is coarse
       # (pending|completed, D-03); `state` is the canonical §11 machine state.
+      # SEC-08 — send it back as `content_hash` on respond to bind a decision
+      # to exactly this content.
+      content_hash: request.content_hash,
       state: request.state,
       status: status(request),
       result: result(request),
@@ -57,7 +60,8 @@ defmodule HumanportWeb.RequestJSON do
     %{
       answer: request.answer,
       answered_by: request.decided_by,
-      answered_at: request.completed_at
+      answered_at: request.completed_at,
+      content_hash: request.decided_content_hash
     }
   end
 
@@ -70,7 +74,8 @@ defmodule HumanportWeb.RequestJSON do
       selected_option_ids: request.selected_option_ids,
       free_text: request.answer,
       decided_by: request.decided_by,
-      decided_at: request.completed_at
+      decided_at: request.completed_at,
+      content_hash: request.decided_content_hash
     }
   end
 
@@ -78,7 +83,8 @@ defmodule HumanportWeb.RequestJSON do
     %{
       decision: request.decision,
       decided_by: request.decided_by,
-      decided_at: request.completed_at
+      decided_at: request.completed_at,
+      content_hash: request.decided_content_hash
     }
   end
 

@@ -85,21 +85,29 @@ defmodule HumanportWeb.RequestController do
 
   def respond(conn, %{"id" => id} = params) do
     with {:ok, request} <- Requests.get_request(id),
-         {:ok, responded} <- dispatch_respond(request, params, conn.assigns.actor) do
+         {:ok, responded} <-
+           dispatch_respond(request, params, conn.assigns.actor, content_opts(params)) do
       render(conn, :show, request: responded)
     end
   end
 
-  defp dispatch_respond(request, %{"decision" => decision}, actor) do
+  # SEC-08 — an optional `content_hash` in the body: the fingerprint of the
+  # content the decider was shown (the request's own `content_hash` field as
+  # they read it). When present, the decision goes through only if it still
+  # matches; when absent, the decision is bound to the content as stored now.
+  defp content_opts(%{"content_hash" => hash}) when is_binary(hash), do: [content_hash: hash]
+  defp content_opts(_params), do: []
+
+  defp dispatch_respond(request, %{"decision" => decision}, actor, opts) do
     case decision do
-      "approve" -> Requests.approve(request, actor)
-      "reject" -> Requests.reject(request, actor)
+      "approve" -> Requests.approve(request, actor, opts)
+      "reject" -> Requests.reject(request, actor, opts)
       _ -> invalid_field_error(:decision, "decision must be \"approve\" or \"reject\"")
     end
   end
 
-  defp dispatch_respond(request, %{"answer" => answer}, actor) do
-    Requests.answer(request, answer, actor)
+  defp dispatch_respond(request, %{"answer" => answer}, actor, opts) do
+    Requests.answer(request, answer, actor, opts)
   end
 
   # CORE-04 — a body naming a selection is dispatched ahead of the
@@ -108,23 +116,30 @@ defmodule HumanportWeb.RequestController do
   # `Requests.choose/3` with both fields it was sent, never ambiguously.
   # `selected_option_ids` may be `[]` — a choose request's free-text-only
   # answer, when a caller sends the key explicitly rather than omitting it.
-  defp dispatch_respond(request, %{"selected_option_ids" => selected_option_ids} = params, actor)
+  defp dispatch_respond(
+         request,
+         %{"selected_option_ids" => selected_option_ids} = params,
+         actor,
+         opts
+       )
        when is_list(selected_option_ids) do
     Requests.choose(
       request,
       %{selected_option_ids: selected_option_ids, free_text: Map.get(params, "free_text")},
-      actor
+      actor,
+      opts
     )
   end
 
   # A caller who omits `selected_option_ids` entirely and sends only
   # `free_text` — the choose request's free-text-only answer, in its
   # shortest form.
-  defp dispatch_respond(request, %{"free_text" => free_text}, actor) when is_binary(free_text) do
-    Requests.choose(request, %{selected_option_ids: [], free_text: free_text}, actor)
+  defp dispatch_respond(request, %{"free_text" => free_text}, actor, opts)
+       when is_binary(free_text) do
+    Requests.choose(request, %{selected_option_ids: [], free_text: free_text}, actor, opts)
   end
 
-  defp dispatch_respond(_request, _params, _actor) do
+  defp dispatch_respond(_request, _params, _actor, _opts) do
     invalid_field_error(
       :body,
       "request body must include \"answer\", \"decision\", or \"selected_option_ids\""

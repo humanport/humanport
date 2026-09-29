@@ -39,7 +39,11 @@ defmodule HumanportWeb.MCP.ParityTest do
   # timestamps) — written out explicitly, per the plan's own instruction,
   # so a future field addition to RequestJSON.show/1 fails this test rather
   # than silently slipping through an implicit filter.
-  @excluded_result_keys ~w(id title inserted_at updated_at)
+  # `content_hash` (SEC-08) fingerprints the title among the rest of the
+  # content, so it differs between the two sides for exactly the reason
+  # `title` does — and for no other: every other field it covers is compared
+  # below.
+  @excluded_result_keys ~w(id title content_hash inserted_at updated_at)
 
   test "MCP-created and HTTP-created requests, from genuinely concurrent processes on separate connections, are field-by-field indistinguishable and neither audit event carries a channel marker" do
     mcp_conn = Phoenix.ConnTest.build_conn()

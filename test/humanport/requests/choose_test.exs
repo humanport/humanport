@@ -372,7 +372,8 @@ defmodule Humanport.Requests.ChooseTest do
 
       assert choice_event.metadata == %{
                "selected_options" => [%{"id" => "opt-b", "label" => "Option B"}],
-               "free_text_given" => false
+               "free_text_given" => false,
+               "content_hash" => chosen.content_hash
              }
     end
 

@@ -71,8 +71,8 @@ system, and `<.icon>` / `<.field>` come from Petal, not from `core_components.ex
   browser loads is served by the HumanPort instance itself.
 - The approval confirmation token is mis-click prevention, not content binding. It must
   never be described in code, comments or docs as expressing §54.8's content-binding
-  guarantee — that binding is the content hash on the approval record (SEC-08, Phase 4),
-  not yet built.
+  guarantee — that binding is the content hash on the decision record (SEC-08:
+  `Humanport.Requests.ContentHash`, `content_hash` / `decided_content_hash`).
 - Nothing from the private planning tree (`.planning/`, `PROJECT.md`, `ROADMAP.md`,
   `STATE.md`, `REQUIREMENTS.md`, ADRs) may be committed to this repository. `leak-guard`
   enforces this on every commit and push — never weaken the rule, never pass

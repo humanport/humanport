@@ -46,6 +46,12 @@ defmodule HumanportWeb.AshErrorMapper do
           Enum.find(errors, &match?(%AshStateMachine.Errors.NoMatchingTransition{}, &1)) ->
         classify_no_matching_transition(transition_error)
 
+      # SEC-08 — the decision named content that is not the request's
+      # current, unaltered content. A conflict, not a malformed call: the
+      # caller must reload and look again, exactly like a lost race.
+      content_error = Enum.find(errors, &match?(%Humanport.Requests.Errors.ContentChanged{}, &1)) ->
+        {:conflict, Exception.message(content_error)}
+
       not_implemented_error = Enum.find(errors, &not_implemented_type?/1) ->
         {:not_implemented, not_implemented_message(not_implemented_error)}
 

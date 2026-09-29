@@ -24,9 +24,10 @@ defmodule HumanPort.UI.ApprovalCard do
   binding.** It sits on screen in the hint sentence, so a reader could copy
   it without ever having read the request.
 
-  The real §54.8 content-binding guarantee is not implemented in Phase 1 —
-  that requires a stored hash of the exact content the human was shown,
-  which is SEC-08, a later phase.
+  The §54.8 content-binding guarantee is the stored fingerprint of the exact
+  content the human was shown (SEC-08: `content_hash` / `decided_content_hash`
+  on the request, checked by `Humanport.Requests` on every decision). It is
+  entirely separate from this token.
 
   No comment, doc, or commit message may claim this token satisfies §54.8's content-binding guarantee — not here, not anywhere in this module.
 
